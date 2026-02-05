@@ -25,6 +25,19 @@ htmlcov/
 .mypy_cache/
 .pytype/
 
+# Pipeline Data and Artifacts
+raw/
+clean/
+sft/
+quality/
+dataset/
+models/
+sources/
+!sources/manifest.json
+
+# Pipeline Logs and Manifests
+manifests/*.jsonl
+
 # IDE/editor
 .vscode/
 .idea/

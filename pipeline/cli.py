@@ -1,15 +1,12 @@
 import argparse
 import sys
-import yaml
 from pathlib import Path
 from .logger import PipelineLogger
-
-def load_config(config_path: str = "pipeline.yaml"):
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+from .utils import load_config, get_project_root
 
 def run_stage(stage_name: str, config: dict):
-    logger = PipelineLogger(stage_name, Path("manifests"))
+    root = get_project_root()
+    logger = PipelineLogger(stage_name, root / "manifests")
     logger.info(f"Starting stage: {stage_name}")
     
     # Placeholder for stage execution logic
