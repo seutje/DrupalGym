@@ -66,19 +66,24 @@ def train_model(model_config: dict, dataset_dir: Path, output_dir: Path, logger:
     # 4. Training Arguments
     training_args = TrainingArguments(
         output_dir=str(output_dir),
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=4,
+        per_device_train_batch_size=1, # Reduced for 12GB VRAM
+        gradient_accumulation_steps=16, # Compensate for small batch size
         learning_rate=2e-4,
         num_train_epochs=1,
-        logging_steps=10,
-        evaluation_strategy="steps",
-        eval_steps=100,
+        max_steps=10, # Short test run
+        logging_steps=1,
+        eval_strategy="steps",
+        eval_steps=50,
         save_strategy="steps",
-        save_steps=100,
+        save_steps=50,
         fp16=False,
         bf16=True,
         optim="paged_adamw_8bit",
-        report_to="tensorboard"
+        report_to="tensorboard",
+        gradient_checkpointing=True, # Essential for 12GB VRAM
+        max_grad_norm=0.3,
+        warmup_ratio=0.03,
+        lr_scheduler_type="cosine",
     )
 
     trainer = Trainer(
@@ -97,19 +102,34 @@ def train_model(model_config: dict, dataset_dir: Path, output_dir: Path, logger:
     logger.info(f"Training completed for {model_name}. Adapter saved to {output_dir / 'adapter'}")
 
 def run_training_stage(config: dict, logger: PipelineLogger, root: Path):
+    if not torch.cuda.is_available():
+        logger.error("CUDA is not available. GPU is required for training.")
+        return 1
+
+    gpu_name = torch.cuda.get_device_name(0)
+    logger.info(f"Detected GPU: {gpu_name}")
+
     dataset_version = "v1"
     dataset_dir = root / "dataset" / dataset_version
     models_dir = root / "models"
     
-    for model_cfg in config.get("models", []):
+    # For testing on 4070, we'll process the first model in the config
+    # to avoid running out of disk space or time if multiple are defined.
+    models_to_train = config.get("models", [])
+    if not models_to_train:
+        logger.error("No models defined in configuration.")
+        return 1
+
+    for model_cfg in models_to_train:
         model_name = model_cfg["name"]
         output_dir = models_dir / model_name / "test_run"
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"Preparing training for {model_name}...")
-        # In a real environment, we would call train_model here
-        # For this execution, we will skip the actual training call
-        # but log that it's "ready".
-        logger.info(f"SKIPPING actual training for {model_name} (No GPU environment)")
+        logger.info(f"Starting actual training for {model_name}...")
+        try:
+            train_model(model_cfg, dataset_dir, output_dir, logger)
+        except Exception as e:
+            logger.error(f"Training failed for {model_name}: {str(e)}")
+            return 1
         
     return 0
