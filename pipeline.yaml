@@ -1,0 +1,41 @@
+# DrupalGym Pipeline Configuration
+project_name: "DrupalGym"
+version: "1.0.0"
+seed: 42
+
+directories:
+  raw: "raw"
+  clean: "clean"
+  sft: "sft"
+  quality: "quality"
+  dataset: "dataset"
+  eval: "eval"
+  models: "models"
+  manifests: "manifests"
+  sources: "sources"
+
+sources:
+  drupal_core:
+    type: "git"
+    url: "https://git.drupalcode.org/project/drupal.git"
+    branch: "11.x"
+  drupal_projects:
+    type: "api"
+    endpoint: "https://www.drupal.org/api-d7/node.json"
+    filters:
+      core_compatibility: "^11"
+
+dataset:
+  targets:
+    train: 0.8
+    valid: 0.1
+    test: 0.1
+  max_seq_len: 2048
+
+models:
+  - name: "Qwen2.5-Coder-7B"
+    base_model: "Qwen/Qwen2.5-Coder-7B"
+    training_type: "QLoRA"
+  - name: "Ministral-3-8B"
+    base_model: "mistralai/Ministral-3-8B-Instruct-2410"
+    training_type: "QLoRA"
