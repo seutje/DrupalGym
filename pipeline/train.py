@@ -1,5 +1,51 @@
 import os
 import torch
+
+def patch_torch_matmul():
+    if getattr(torch, "matmul_orig", None):
+        return
+    torch.matmul_orig = torch.matmul
+    def patched_matmul(a, b, out=None):
+        if a.is_cuda and out is None:
+            if a.dim() == 2 and b.dim() == 2:
+                return torch.mm(a, b)
+            
+            # Handle the case where one is 2D and the other is >2D
+            if a.dim() > 2 and b.dim() == 2:
+                a_shape = a.shape
+                res = torch.mm(a.reshape(-1, a_shape[-1]), b)
+                return res.reshape(*a_shape[:-1], b.shape[-1])
+            
+            if a.dim() == 2 and b.dim() > 2:
+                # b is (Batch, N, P), a is (M, N)
+                # This is less common but can happen
+                b_shape = b.shape
+                # We want (M, N) @ (Batch, N, P) -> (Batch, M, P)
+                # torch.matmul does this by broadcasting a
+                res = torch.mm(a, b.transpose(0, 1).reshape(b_shape[1], -1))
+                return res.reshape(a.shape[0], b_shape[0], b_shape[2]).transpose(0, 1)
+
+            if a.dim() >= 3 and b.dim() >= 3:
+                # Batched matmul with both side batched
+                # If they have same batch dims, we can loop
+                if a.shape[:-2] == b.shape[:-2]:
+                    if a.dim() == 3:
+                        res = torch.empty(a.shape[0], a.shape[1], b.shape[2], device=a.device, dtype=a.dtype)
+                        for i in range(a.shape[0]):
+                            res[i] = torch.mm(a[i], b[i])
+                        return res
+                    if a.dim() == 4:
+                        res = torch.empty(a.shape[0], a.shape[1], a.shape[2], b.shape[3], device=a.device, dtype=a.dtype)
+                        for i in range(a.shape[0]):
+                            for j in range(a.shape[1]):
+                                res[i, j] = torch.mm(a[i, j], b[i, j])
+                        return res
+        
+        return torch.matmul_orig(a, b, out=out)
+    torch.matmul = patched_matmul
+
+patch_torch_matmul()
+
 from pathlib import Path
 from datasets import load_dataset
 from transformers import (
@@ -16,6 +62,8 @@ from .logger import PipelineLogger
 def _resolve_dtype(dtype_name: str):
     if dtype_name == "bfloat16":
         return torch.bfloat16
+    if dtype_name == "float32":
+        return torch.float32
     return torch.float16
 
 def train_model(
@@ -60,7 +108,8 @@ def train_model(
         model_name,
         quantization_config=bnb_config,
         device_map="auto",
-        trust_remote_code=True
+        trust_remote_code=True,
+        attn_implementation="eager"
     )
     model.config.use_cache = False
 
@@ -141,7 +190,7 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path):
         "logging_steps": 1,
         "eval_strategy": "no",
         "save_strategy": "no",
-        "fp16": True,
+        "fp16": False,
         "bf16": False,
         "gradient_checkpointing": True,
         "use_reentrant_gc": False,
@@ -150,7 +199,7 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path):
         "lora_alpha": 16,
         "lora_dropout": 0.05,
         "lora_target_modules": ["q_proj", "v_proj"],
-        "bnb_4bit_compute_dtype": "float16",
+        "bnb_4bit_compute_dtype": "float32",
         "max_models": 1,
     }
     train_cfg = default_test_cfg | config.get("training", {}).get("test_run", {})
