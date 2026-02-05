@@ -30,12 +30,29 @@ class QualityGate:
         # 3. Instruction quality
         if "explain the following topic" in instruction:
              topic = instruction.split(":")[-1].strip()
-             if len(topic) < 10:
+             if len(topic) < 6:
                  return False, "poor_instruction"
+             
+             generic_titles = [
+                "contents of this file", "introduction", "readme", "license", 
+                "requirements", "installation", "configuration", "for developers",
+                "description", "features", "support", "author", "maintainers",
+                "copyright", "how it works", "prerequisites", "cors configuration",
+                "tracking script verification", "using the condition", "cookie behavior",
+                "gnu general public license"
+             ]
+             if topic in generic_titles:
+                 return False, "generic_topic"
+
              if any(term in topic for term in ["cookie", "web beacon", "sign in"]):
                  return False, "irrelevant_topic"
 
-        # 4. Drupal 11 / Modernity check
+        # 4. Content diversity check (avoid single-word or path-only outputs)
+        lines = [l for l in output.split('\n') if l.strip()]
+        if len(lines) < 3 and len(output) < 500:
+             return False, "insufficient_detail"
+
+        # 5. Drupal 11 / Modernity check
         # If it's a doc summary, it should ideally mention modern Drupal or at least not be exclusively D7
         if sample.get("metadata", {}).get("type") == "doc_summary":
             content_lower = output.lower()

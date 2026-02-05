@@ -32,11 +32,60 @@ class InstructionGenerator:
 
     def generate_from_doc(self, content: str, rel_path: str):
         """Generate instructions from documentation."""
+        generic_titles = [
+            "contents of this file", "introduction", "readme", "license", 
+            "requirements", "installation", "configuration", "for developers",
+            "description", "features", "support", "author", "maintainers",
+            "copyright", "how it works", "prerequisites", "cors configuration",
+            "tracking script verification", "using the condition", "cookie behavior",
+            "bulk update user redirect preferences", "troubleshooting",
+            "browser-side reset", "server-side reset", "patches details",
+            "local libraries", "gnu general public license"
+        ]
+
+        # Skip files that are likely not useful for training Drupal 11 logic
+        skip_patterns = [
+            "LICENSE", "CHANGELOG", "COPYRIGHT", ".cspell", "MAINTAINERS",
+            "SECURITY.txt", "DRUPAL_ORG", "fixtures", "node_modules", "vendor"
+        ]
+        if any(p.lower() in rel_path.lower() for p in skip_patterns):
+            return
+
         # Try to find an H1 title
+        title = ""
         title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
         if title_match:
             title = title_match.group(1).strip()
-        else:
+        
+        # If title is generic or missing, try to get it from the path
+        if not title or title.lower() in generic_titles:
+            # Try to get the module name or something meaningful from path
+            path_parts = rel_path.split('/')
+            if 'repos' in path_parts:
+                idx = path_parts.index('repos')
+                if len(path_parts) > idx + 1:
+                    module_name = path_parts[idx + 1].replace('_', ' ').title()
+                    
+                    # Special handling for Drupal Core sub-components
+                    if module_name == "Drupal Core" and len(path_parts) > idx + 4:
+                        # e.g., repos/drupal_core/core/modules/block -> Block
+                        sub_component = path_parts[idx + 4].replace('_', ' ').title()
+                        module_name = f"{module_name}: {sub_component}"
+
+                    # If it's a README, combine module name with the title if title is not generic
+                    if "README" in rel_path:
+                        if title and title.lower() not in generic_titles:
+                            title = f"{module_name}: {title}"
+                        else:
+                            title = module_name
+                    else:
+                        file_stem = Path(rel_path).stem.replace('-', ' ').replace('_', ' ').title()
+                        if title and title.lower() not in generic_titles:
+                            title = f"{module_name} ({file_stem}): {title}"
+                        else:
+                            title = f"{module_name}: {file_stem}"
+
+        if not title:
             # Fallback to first line or filename
             lines = [l for l in content.split('\n') if l.strip() and not l.startswith('!')]
             title = lines[0].strip('# ') if lines else Path(rel_path).stem.replace('-', ' ').replace('_', ' ')
@@ -44,16 +93,22 @@ class InstructionGenerator:
         # Clean up title from common noise
         title = re.sub(r'\{#.*?\}', '', title).strip()
         
-        # Quality filters for instruction
-        if len(title) < 5 or "cookie" in title.lower():
+        # Final quality filters for instruction
+        if len(title) < 5 or "cookie" in title.lower() or title.lower() in generic_titles:
             return
             
         # Version filter: if title mentions old version but not 11, skip
         if re.search(r'\b(7|8|9|10)\.x\b', title) and '11' not in title:
             return
 
+        instruction = f"Explain the following topic based on Drupal 11 documentation: {title}"
+        
+        # Simple deduplication within the same stage run
+        if any(s['instruction'] == instruction and s['output'] == content for s in self.samples):
+            return
+
         self.samples.append({
-            "instruction": f"Explain the following topic based on Drupal 11 documentation: {title}",
+            "instruction": instruction,
             "input": "",
             "output": content,
             "metadata": {
