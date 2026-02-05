@@ -31,7 +31,7 @@ Maintain the directory structure and outputs referenced in `DESIGN.md` and `PLAN
 - `models/<model>/{test_run,final}/`
 - `manifests/` or equivalent for run metadata
 
-Do not rename these without updating all references and documenting the change.
+Do not rename these without updating all references and documenting the change. Update the .gitignore file when necessary.
 
 ## Data and Quality Gates
 Always enforce:
