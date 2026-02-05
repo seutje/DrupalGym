@@ -2,3 +2,12 @@ PyYAML
 requests
 pathlib
 typing-extensions
+beautifulsoup4
+lxml
+torch
+transformers
+peft
+accelerate
+bitsandbytes
+datasets
+tensorboard

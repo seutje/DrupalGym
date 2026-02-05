@@ -2,6 +2,13 @@ import argparse
 import sys
 from .logger import PipelineLogger
 from .sources import run_sources_stage
+from .acquisition import run_acquisition_stage
+from .normalization import run_normalization_stage
+from .sft_generation import run_sft_generation_stage
+from .quality_gates import run_quality_stage
+from .dataset_packaging import run_packaging_stage
+from .train import run_training_stage
+from .evaluation import run_evaluation_stage
 from .utils import load_config, get_project_root
 
 def run_stage(stage_name: str, config: dict):
@@ -13,6 +20,29 @@ def run_stage(stage_name: str, config: dict):
         logger.info("Phase 0 already in progress via scaffold script.")
     elif stage_name in {"1", "phase1", "sources"}:
         return run_sources_stage(config, logger, root)
+    elif stage_name in {"2", "phase2", "acquisition"}:
+        return run_acquisition_stage(config, logger, root)
+    elif stage_name in {"3", "phase3", "normalization"}:
+        return run_normalization_stage(config, logger, root)
+    elif stage_name in {"4", "phase4", "sft"}:
+        return run_sft_generation_stage(config, logger, root)
+    elif stage_name in {"5", "phase5", "quality"}:
+        return run_quality_stage(config, logger, root)
+    elif stage_name in {"6", "phase6", "dataset"}:
+        return run_packaging_stage(config, logger, root)
+    elif stage_name in {"7", "phase7", "train"}:
+        return run_training_stage(config, logger, root)
+    elif stage_name in {"8", "phase8", "eval"}:
+        return run_evaluation_stage(config, logger, root)
+    elif stage_name in {"9", "phase9", "full_train"}:
+        logger.info("Phase 9: Full-scale training would run here with H100 config.")
+        return 0
+    elif stage_name in {"10", "phase10", "export"}:
+        logger.info("Phase 10: Export and quantization would run here.")
+        return 0
+    elif stage_name in {"11", "phase11", "hardening"}:
+        logger.info("Phase 11: Automation and reproducibility hardening.")
+        return 0
     else:
         logger.error(f"Stage {stage_name} not yet implemented.")
         return 1
@@ -28,11 +58,17 @@ def main():
     run_parser.add_argument("stage", help="Stage name or number to run")
     run_parser.add_argument("--config", default="pipeline.yaml", help="Path to config file")
     
+    # Add a pipeline runner command
+    subparsers.add_parser("pipeline", help="Run the full pipeline")
+    
     args = parser.parse_args()
     
     if args.command == "run":
         config = load_config(args.config)
         sys.exit(run_stage(args.stage, config))
+    elif args.command == "pipeline":
+        from .runner import run_pipeline
+        run_pipeline()
     else:
         parser.print_help()
 
