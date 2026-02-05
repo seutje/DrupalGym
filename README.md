@@ -133,7 +133,7 @@ Command:
 python3 -m pipeline run 7
 ```
 Prereqs: CUDA-capable GPU, `dataset/v1/`.
-What it does: runs a short QLoRA test training run for each model in `pipeline.yaml` with `max_steps=10`.
+What it does: runs a low-VRAM QLoRA smoke test from `training.test_run` in `pipeline.yaml` (defaults: `Qwen2.5-Coder-3B`, `max_seq_len=512`, `max_steps=5`).
 Outputs: adapters under `models/<model>/test_run/adapter/` and logs in `manifests/`.
 
 **Stage 8: Evaluation**

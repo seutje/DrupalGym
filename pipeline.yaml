@@ -41,7 +41,34 @@ dataset:
     train: 0.8
     valid: 0.1
     test: 0.1
-  max_seq_len: 2048
+  max_seq_len: 1024
+
+training:
+  test_run:
+    max_seq_len: 512
+    max_steps: 5
+    per_device_train_batch_size: 1
+    per_device_eval_batch_size: 1
+    gradient_accumulation_steps: 8
+    learning_rate: 0.0002
+    logging_steps: 1
+    eval_strategy: "no"
+    save_strategy: "no"
+    fp16: true
+    bf16: false
+    gradient_checkpointing: true
+    use_reentrant_gc: false
+    group_by_length: true
+    lora_r: 8
+    lora_alpha: 16
+    lora_dropout: 0.05
+    lora_target_modules: ["q_proj", "v_proj"]
+    bnb_4bit_compute_dtype: "float16"
+    max_models: 1
+    models:
+      - name: "Qwen2.5-Coder-3B-Test"
+        base_model: "Qwen/Qwen2.5-Coder-3B"
+        training_type: "QLoRA"
 
 models:
   - name: "Qwen2.5-Coder-7B"
