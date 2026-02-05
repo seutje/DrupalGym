@@ -1,7 +1,7 @@
 import argparse
 import sys
-from pathlib import Path
 from .logger import PipelineLogger
+from .sources import run_sources_stage
 from .utils import load_config, get_project_root
 
 def run_stage(stage_name: str, config: dict):
@@ -9,9 +9,10 @@ def run_stage(stage_name: str, config: dict):
     logger = PipelineLogger(stage_name, root / "manifests")
     logger.info(f"Starting stage: {stage_name}")
     
-    # Placeholder for stage execution logic
-    if stage_name == "0":
+    if stage_name in {"0", "phase0"}:
         logger.info("Phase 0 already in progress via scaffold script.")
+    elif stage_name in {"1", "phase1", "sources"}:
+        return run_sources_stage(config, logger, root)
     else:
         logger.error(f"Stage {stage_name} not yet implemented.")
         return 1

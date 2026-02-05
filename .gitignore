@@ -33,6 +33,7 @@ quality/
 dataset/
 models/
 sources/
+!sources/
 !sources/manifest.json
 
 # Pipeline Logs and Manifests

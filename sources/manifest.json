@@ -1,0 +1,751 @@
+{
+  "stage": "sources",
+  "timestamp": "2026-02-05T16:15:12Z",
+  "seed": 42,
+  "rate_limit": {
+    "delay_seconds": 1.0,
+    "max_retries": 3
+  },
+  "metrics": {
+    "projects_discovered": 500,
+    "projects_filtered": 87,
+    "curated_sources": 5
+  },
+  "sources": {
+    "curated": [
+      {
+        "id": "drupal_core",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/drupal.git",
+        "ref": "11.x",
+        "description": "Drupal core repository"
+      },
+      {
+        "id": "drupal_docs",
+        "type": "http",
+        "url": "https://www.drupal.org/docs",
+        "ref": null,
+        "description": "Drupal official documentation"
+      },
+      {
+        "id": "drupal_api",
+        "type": "http",
+        "url": "https://api.drupal.org/api/drupal",
+        "ref": null,
+        "description": "Drupal API reference"
+      },
+      {
+        "id": "symfony_docs",
+        "type": "http",
+        "url": "https://symfony.com/doc/7.0/index.html",
+        "ref": null,
+        "description": "Symfony 7 documentation"
+      },
+      {
+        "id": "drupal_security",
+        "type": "http",
+        "url": "https://www.drupal.org/security",
+        "ref": null,
+        "description": "Drupal security advisories"
+      }
+    ],
+    "drupal_org_projects": [
+      {
+        "id": "layout_builder_restrictions",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/layout_builder_restrictions.git",
+        "ref": "3.x",
+        "composer_url": "https://git.drupalcode.org/project/layout_builder_restrictions/raw/3.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "country",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/country.git",
+        "ref": "2.x",
+        "composer_url": "https://git.drupalcode.org/project/country/raw/2.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "drupal_cms_helper",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/drupal_cms_helper.git",
+        "ref": "2.x",
+        "composer_url": "https://git.drupalcode.org/project/drupal_cms_helper/raw/2.x/composer.json",
+        "core_constraint": "^11.3"
+      },
+      {
+        "id": "taxonomy_term_replace",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/taxonomy_term_replace.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/taxonomy_term_replace/raw/1.0.x/composer.json",
+        "core_constraint": "^9 || ^10 || ^11"
+      },
+      {
+        "id": "webprofiler",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/webprofiler.git",
+        "ref": "11.x",
+        "composer_url": "https://git.drupalcode.org/project/webprofiler/raw/11.x/composer.json",
+        "core_constraint": ">=11"
+      },
+      {
+        "id": "compiler",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/compiler.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/compiler/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "metatag_ai",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/metatag_ai.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/metatag_ai/raw/1.0.x/composer.json",
+        "core_constraint": "^9 || ^10 || ^11"
+      },
+      {
+        "id": "ai_context",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ai_context.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/ai_context/raw/1.0.x/composer.json",
+        "core_constraint": "^10.4 || ^11"
+      },
+      {
+        "id": "flowdrop_ui_agents",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/flowdrop_ui_agents.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/flowdrop_ui_agents/raw/1.0.x/composer.json",
+        "core_constraint": "^11"
+      },
+      {
+        "id": "time_clock",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/time_clock.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/time_clock/raw/1.0.x/composer.json",
+        "core_constraint": "^10.1 || ^11"
+      },
+      {
+        "id": "data_count",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/data_count.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/data_count/raw/1.0.x/composer.json",
+        "core_constraint": "^8.8 || ^9 || ^10 || ^11"
+      },
+      {
+        "id": "views_block_with_lazy_builder",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/views_block_with_lazy_builder.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/views_block_with_lazy_builder/raw/1.0.x/composer.json",
+        "core_constraint": "^9 || ^10 || ^11"
+      },
+      {
+        "id": "seo_audit",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/seo_audit.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/seo_audit/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "mcp_client",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/mcp_client.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/mcp_client/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "ai_provider_openrouter",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ai_provider_openrouter.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/ai_provider_openrouter/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "nested_entity_reference_formatter",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/nested_entity_reference_formatter.git",
+        "ref": "8.x-1.x",
+        "composer_url": "https://git.drupalcode.org/project/nested_entity_reference_formatter/raw/8.x-1.x/composer.json",
+        "core_constraint": "^8.8 || ^9 || ^10 || ^11"
+      },
+      {
+        "id": "token_browser",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/token_browser.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/token_browser/raw/1.0.x/composer.json",
+        "core_constraint": "^11.3"
+      },
+      {
+        "id": "flowdrop_ai_provider",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/flowdrop_ai_provider.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/flowdrop_ai_provider/raw/1.0.x/composer.json",
+        "core_constraint": "^11.2"
+      },
+      {
+        "id": "display_builder",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/display_builder.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/display_builder/raw/1.0.x/composer.json",
+        "core_constraint": "^11.3"
+      },
+      {
+        "id": "canvas_bootstrap",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/canvas_bootstrap.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/canvas_bootstrap/raw/1.0.x/composer.json",
+        "core_constraint": "^11"
+      },
+      {
+        "id": "bootstrap_components",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/bootstrap_components.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/bootstrap_components/raw/1.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "recipe_code_installer",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/recipe_code_installer.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/recipe_code_installer/raw/1.x/composer.json",
+        "core_constraint": "^10.5.0 || ^11.2.0"
+      },
+      {
+        "id": "flowdrop",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/flowdrop.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/flowdrop/raw/1.x/composer.json",
+        "core_constraint": "^11.2"
+      },
+      {
+        "id": "livre",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/livre.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/livre/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "tmgmt_laratranslate",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/tmgmt_laratranslate.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/tmgmt_laratranslate/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "views_pretty_paths",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/views_pretty_paths.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/views_pretty_paths/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "cron_fail_alert",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/cron_fail_alert.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/cron_fail_alert/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "zefix",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/zefix.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/zefix/raw/1.0.x/composer.json",
+        "core_constraint": "^8.8 || ^9 || ^10 || ^11"
+      },
+      {
+        "id": "business_identity",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/business_identity.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/business_identity/raw/1.0.x/composer.json",
+        "core_constraint": "^11.0"
+      },
+      {
+        "id": "lightgallery_formatter",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/lightgallery_formatter.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/lightgallery_formatter/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "html_lang_override",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/html_lang_override.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/html_lang_override/raw/1.0.x/composer.json",
+        "core_constraint": "^9 || ^10 || ^11"
+      },
+      {
+        "id": "easy_encryption",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/easy_encryption.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/easy_encryption/raw/1.0.x/composer.json",
+        "core_constraint": "^11.2"
+      },
+      {
+        "id": "inline_image_saver",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/inline_image_saver.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/inline_image_saver/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "require_revision",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/require_revision.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/require_revision/raw/1.0.x/composer.json",
+        "core_constraint": "^10.2 || ^11"
+      },
+      {
+        "id": "popup_img_plus_txt",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/popup_img_plus_txt.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/popup_img_plus_txt/raw/1.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "labor_time_tracker",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/labor_time_tracker.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/labor_time_tracker/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "pinto_entity",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/pinto_entity.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/pinto_entity/raw/1.x/composer.json",
+        "core_constraint": "^10.5 || ^11.2"
+      },
+      {
+        "id": "paragraphs_iframe_preview",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/paragraphs_iframe_preview.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/paragraphs_iframe_preview/raw/1.0.x/composer.json",
+        "core_constraint": "^8 || ^9 || ^10 || ^11"
+      },
+      {
+        "id": "node_change_default_language",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/node_change_default_language.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/node_change_default_language/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "multilingual_tokens",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/multilingual_tokens.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/multilingual_tokens/raw/1.0.x/composer.json",
+        "core_constraint": "^10.2 || ^11.0"
+      },
+      {
+        "id": "user_preference_login_redirect",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/user_preference_login_redirect.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/user_preference_login_redirect/raw/1.x/composer.json",
+        "core_constraint": "^11"
+      },
+      {
+        "id": "layout_builder_formatter",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/layout_builder_formatter.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/layout_builder_formatter/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11.0"
+      },
+      {
+        "id": "canvas_full_html",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/canvas_full_html.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/canvas_full_html/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "api_normalization",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/api_normalization.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/api_normalization/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "nexi_xpay",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/nexi_xpay.git",
+        "ref": "2.x",
+        "composer_url": "https://git.drupalcode.org/project/nexi_xpay/raw/2.x/composer.json",
+        "core_constraint": ">=11.3 <12"
+      },
+      {
+        "id": "commerce_referral",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/commerce_referral.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/commerce_referral/raw/1.0.x/composer.json",
+        "core_constraint": "^11"
+      },
+      {
+        "id": "slider_gallery",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/slider_gallery.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/slider_gallery/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "username_suggester",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/username_suggester.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/username_suggester/raw/1.x/composer.json",
+        "core_constraint": "^11.3"
+      },
+      {
+        "id": "content_cleaner",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/content_cleaner.git",
+        "ref": "master",
+        "composer_url": "https://git.drupalcode.org/project/content_cleaner/raw/master/composer.json",
+        "core_constraint": "^9.0 || ^10.0 || ^11.0"
+      },
+      {
+        "id": "document_loader_plugin_api",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/document_loader_plugin_api.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/document_loader_plugin_api/raw/1.0.x/composer.json",
+        "core_constraint": "^10.4 || ^11"
+      },
+      {
+        "id": "govcms_ca3_consumer_helper",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/govcms_ca3_consumer_helper.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/govcms_ca3_consumer_helper/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "d2",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/d2.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/d2/raw/1.0.x/composer.json",
+        "core_constraint": "^11"
+      },
+      {
+        "id": "metatag_ai_generate",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/metatag_ai_generate.git",
+        "ref": "main",
+        "composer_url": "https://git.drupalcode.org/project/metatag_ai_generate/raw/main/composer.json",
+        "core_constraint": "^10.2 || ^11"
+      },
+      {
+        "id": "jsonapi_security",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/jsonapi_security.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/jsonapi_security/raw/1.0.x/composer.json",
+        "core_constraint": "^10.6 || ^11.2"
+      },
+      {
+        "id": "wp_drupal_migrate",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/wp_drupal_migrate.git",
+        "ref": "main",
+        "composer_url": "https://git.drupalcode.org/project/wp_drupal_migrate/raw/main/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "ai_components",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ai_components.git",
+        "ref": "main",
+        "composer_url": "https://git.drupalcode.org/project/ai_components/raw/main/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "purge_tag_mapper",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/purge_tag_mapper.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/purge_tag_mapper/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "social_auth_account_verification",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/social_auth_account_verification.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/social_auth_account_verification/raw/1.0.x/composer.json",
+        "core_constraint": "^11"
+      },
+      {
+        "id": "mautic_personalisation",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/mautic_personalisation.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/mautic_personalisation/raw/1.0.x/composer.json",
+        "core_constraint": "^10||^11"
+      },
+      {
+        "id": "image_hotspots_agent",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/image_hotspots_agent.git",
+        "ref": "main",
+        "composer_url": "https://git.drupalcode.org/project/image_hotspots_agent/raw/main/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "block_description_modifier",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/block_description_modifier.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/block_description_modifier/raw/1.0.x/composer.json",
+        "core_constraint": "^11"
+      },
+      {
+        "id": "http_drush_wrapper",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/http_drush_wrapper.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/http_drush_wrapper/raw/1.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "section_banner",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/section_banner.git",
+        "ref": "main",
+        "composer_url": "https://git.drupalcode.org/project/section_banner/raw/main/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "bef_daterange_picker",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/bef_daterange_picker.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/bef_daterange_picker/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "supported_image_swiper_formatter",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/supported_image_swiper_formatter.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/supported_image_swiper_formatter/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "ai_rag_search_summary",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ai_rag_search_summary.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/ai_rag_search_summary/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "paragraph_iframe_preview",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/paragraph_iframe_preview.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/paragraph_iframe_preview/raw/1.0.x/composer.json",
+        "core_constraint": "^8 || ^9 || ^10 || ^11"
+      },
+      {
+        "id": "views_filter_role_access",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/views_filter_role_access.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/views_filter_role_access/raw/1.0.x/composer.json",
+        "core_constraint": "^9.4 || ^10 || ^11"
+      },
+      {
+        "id": "document_loader",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/document_loader.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/document_loader/raw/1.0.x/composer.json",
+        "core_constraint": "^10.4 || ^11"
+      },
+      {
+        "id": "ai_revision_assistant",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ai_revision_assistant.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/ai_revision_assistant/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "metabase",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/metabase.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/metabase/raw/1.0.x/composer.json",
+        "core_constraint": "^9.5 || ^10 || ^11"
+      },
+      {
+        "id": "content_language_management",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/content_language_management.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/content_language_management/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "ck5_webform",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ck5_webform.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/ck5_webform/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11.0"
+      },
+      {
+        "id": "bootstrap_five_layouts",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/bootstrap_five_layouts.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/bootstrap_five_layouts/raw/1.0.x/composer.json",
+        "core_constraint": "^10.3 || ^11"
+      },
+      {
+        "id": "hello_contrib",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/hello_contrib.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/hello_contrib/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "ai_image_crop",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ai_image_crop.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/ai_image_crop/raw/1.0.x/composer.json",
+        "core_constraint": "^10.2 || ^11"
+      },
+      {
+        "id": "security_advisories_nl",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/security_advisories_nl.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/security_advisories_nl/raw/1.x/composer.json",
+        "core_constraint": "^9.4 || ^10 || ^11"
+      },
+      {
+        "id": "soap_client",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/soap_client.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/soap_client/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "sdc_inline_editor",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/sdc_inline_editor.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/sdc_inline_editor/raw/1.0.x/composer.json",
+        "core_constraint": "^11.0"
+      },
+      {
+        "id": "pantheon_si_tokens",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/pantheon_si_tokens.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/pantheon_si_tokens/raw/1.0.x/composer.json",
+        "core_constraint": "^10.1 || ^11"
+      },
+      {
+        "id": "webform_rate_limit",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/webform_rate_limit.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/webform_rate_limit/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "mautic_content_provider",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/mautic_content_provider.git",
+        "ref": "1.x",
+        "composer_url": "https://git.drupalcode.org/project/mautic_content_provider/raw/1.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "ai_lead_chatbot",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ai_lead_chatbot.git",
+        "ref": "11.x",
+        "composer_url": "https://git.drupalcode.org/project/ai_lead_chatbot/raw/11.x/composer.json",
+        "core_constraint": "^11"
+      },
+      {
+        "id": "db_wipe",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/db_wipe.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/db_wipe/raw/1.0.x/composer.json",
+        "core_constraint": "^10.2 || ^11.0"
+      },
+      {
+        "id": "ai_nl_test",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/ai_nl_test.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/ai_nl_test/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "laposta_subscribe",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/laposta_subscribe.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/laposta_subscribe/raw/1.0.x/composer.json",
+        "core_constraint": "^10 || ^11"
+      },
+      {
+        "id": "eca_ng",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/eca_ng.git",
+        "ref": "1.0.x",
+        "composer_url": "https://git.drupalcode.org/project/eca_ng/raw/1.0.x/composer.json",
+        "core_constraint": "^11.3"
+      }
+    ]
+  }
+}

@@ -2,7 +2,7 @@ import json
 import time
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 class Manifest:
     """Handles versioned manifest files for pipeline stages."""

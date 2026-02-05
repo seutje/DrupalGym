@@ -1,0 +1,17 @@
+{
+  "stage": "sources",
+  "timestamp": "2026-02-05T16:15:12Z",
+  "inputs": [],
+  "outputs": {
+    "sources_manifest": {
+      "path": "sources/manifest.json",
+      "hash": "d7d4c6b51966134d46fb7e1fb948d7acb852bd90cbf38cc761eb8914fa6df91f"
+    }
+  },
+  "metrics": {
+    "projects_discovered": 500,
+    "projects_filtered": 87,
+    "curated_sources": 5
+  },
+  "config": {}
+}

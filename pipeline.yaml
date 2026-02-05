@@ -24,6 +24,17 @@ sources:
     endpoint: "https://www.drupal.org/api-d7/node.json"
     filters:
       core_compatibility: "^11"
+    user_agent: "DrupalGym/1.0"
+    max_pages: 10
+    limit: 50
+    sort: "changed"
+    direction: "desc"
+    # Optional: provide a contact email if Drupal.org requires it
+    # from: "you@example.com"
+    # Optional: referer/header overrides for strict WAFs
+    # referer: "https://www.drupal.org/"
+    # headers:
+    #   Accept-Language: "en-US,en;q=0.9"
 
 dataset:
   targets:
