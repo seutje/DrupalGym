@@ -4,6 +4,7 @@ pathlib
 typing-extensions
 beautifulsoup4
 lxml
+markdownify
 torch
 transformers
 peft

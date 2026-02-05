@@ -32,9 +32,26 @@ class InstructionGenerator:
 
     def generate_from_doc(self, content: str, rel_path: str):
         """Generate instructions from documentation."""
-        lines = content.split('\n')
-        title = lines[0] if lines else "Drupal 11 Documentation"
+        # Try to find an H1 title
+        title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        if title_match:
+            title = title_match.group(1).strip()
+        else:
+            # Fallback to first line or filename
+            lines = [l for l in content.split('\n') if l.strip() and not l.startswith('!')]
+            title = lines[0].strip('# ') if lines else Path(rel_path).stem.replace('-', ' ').replace('_', ' ')
         
+        # Clean up title from common noise
+        title = re.sub(r'\{#.*?\}', '', title).strip()
+        
+        # Quality filters for instruction
+        if len(title) < 5 or "cookie" in title.lower():
+            return
+            
+        # Version filter: if title mentions old version but not 11, skip
+        if re.search(r'\b(7|8|9|10)\.x\b', title) and '11' not in title:
+            return
+
         self.samples.append({
             "instruction": f"Explain the following topic based on Drupal 11 documentation: {title}",
             "input": "",

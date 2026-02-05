@@ -13,25 +13,36 @@ class QualityGate:
 
     def check_sample(self, sample: dict) -> tuple[bool, str]:
         output = sample.get("output", "")
+        instruction = sample.get("instruction", "").lower()
         
         # 1. Basic length checks
-        if len(output) < 50:
+        if len(output) < 150: # Increased minimum length
             return False, "too_short"
         if len(output) > 50000:
             return False, "too_long"
             
-        # 2. Drupal 11 Specificity (Heuristic)
-        # Check for PHP 8 attributes in code samples
-        if sample.get("metadata", {}).get("type") == "code_reference":
-            if "#[" in output:
-                # Good: contains attributes
-                pass
-            elif "/**" in output and "@" in output:
-                # Potential old-style annotations. 
-                # We might not reject them yet, but we could flag them.
-                pass
-        
-        # 3. Quality indicators
+        # 2. Boilerplate Detection
+        boilerplate_terms = ["cookie", "yes, please", "no, do not track me", "sign in", "log in", "create an account"]
+        for term in boilerplate_terms:
+            if term in output.lower()[:200]: # Check beginning of file
+                return False, "boilerplate_content"
+
+        # 3. Instruction quality
+        if "explain the following topic" in instruction:
+             topic = instruction.split(":")[-1].strip()
+             if len(topic) < 10:
+                 return False, "poor_instruction"
+             if any(term in topic for term in ["cookie", "web beacon", "sign in"]):
+                 return False, "irrelevant_topic"
+
+        # 4. Drupal 11 / Modernity check
+        # If it's a doc summary, it should ideally mention modern Drupal or at least not be exclusively D7
+        if sample.get("metadata", {}).get("type") == "doc_summary":
+            content_lower = output.lower()
+            if "drupal 7" in content_lower and not any(v in content_lower for v in ["drupal 8", "drupal 9", "drupal 10", "drupal 11", "symfony"]):
+                return False, "drupal_7_only"
+
+        # 5. PHP Quality
         if "<?php" in output and "namespace" not in output:
             if "hook_" not in output:
                 return False, "missing_namespace_in_php"
