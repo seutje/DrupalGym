@@ -29,12 +29,6 @@ sources:
     limit: 50
     sort: "changed"
     direction: "desc"
-    # Optional: provide a contact email if Drupal.org requires it
-    # from: "you@example.com"
-    # Optional: referer/header overrides for strict WAFs
-    # referer: "https://www.drupal.org/"
-    # headers:
-    #   Accept-Language: "en-US,en;q=0.9"
 
 dataset:
   targets:
@@ -45,24 +39,24 @@ dataset:
 
 training:
   test_run:
-    max_seq_len: 512
-    max_steps: 5
+    max_seq_len: 2048
+    max_steps: 100
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
-    gradient_accumulation_steps: 8
+    gradient_accumulation_steps: 16
     learning_rate: 0.0002
-    logging_steps: 1
+    logging_steps: 5
     eval_strategy: "no"
     save_strategy: "no"
     fp16: false
     bf16: false
-    gradient_checkpointing: false
+    gradient_checkpointing: true
     use_reentrant_gc: false
     group_by_length: false
-    lora_r: 8
-    lora_alpha: 16
+    lora_r: 32
+    lora_alpha: 64
     lora_dropout: 0.05
-    lora_target_modules: ["q_proj", "v_proj"]
+    lora_target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
     bnb_4bit_compute_dtype: "float32"
     max_models: 1
     models:
