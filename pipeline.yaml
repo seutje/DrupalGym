@@ -26,7 +26,7 @@ sources:
       core_compatibility: "^11"
     user_agent: "DrupalGym/1.0"
     max_pages: 10
-    limit: 50
+    limit: 1000
     sort: "changed"
     direction: "desc"
 
@@ -68,13 +68,13 @@ training:
     num_train_epochs: 3
     per_device_train_batch_size: 4
     per_device_eval_batch_size: 4
-    gradient_accumulation_steps: 8
+    gradient_accumulation_steps: 16 # Increased for 20h target
     learning_rate: 0.0002
     logging_steps: 10
     eval_strategy: "steps"
-    eval_steps: 100
+    eval_steps: 500
     save_strategy: "steps"
-    save_steps: 100
+    save_steps: 500
     fp16: false
     bf16: true
     gradient_checkpointing: true
@@ -85,7 +85,11 @@ training:
     lora_dropout: 0.05
     lora_target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
     bnb_4bit_compute_dtype: "bfloat16"
-    max_models: 2
+    max_models: 1 # Focus on one model for the 20h session
+    models:
+      - name: "Qwen2.5-Coder-7B"
+        base_model: "Qwen/Qwen2.5-Coder-7B"
+        training_type: "QLoRA"
 
 export:
   formats: ["safetensors", "gguf"]

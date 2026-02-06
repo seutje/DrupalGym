@@ -169,6 +169,69 @@ python3 -m pipeline run 11
 What it does: currently logs a placeholder message only.
 Outputs: none yet.
 
+## RunPod Deployment
+
+To run a full training session (Phase 9) on a RunPod H100 instance while minimizing costs and time, follow these instructions.
+
+### 1. Strategy: Data Preparation vs. Training
+To minimize expensive H100 time, you should prepare the dataset on a cheaper instance or locally.
+
+*Note: Per user requirements, we assume the entire pipeline (Stages 0-8) runs on the rented RunPod environment, while Stage 9 is the target for the full-scale H100 session.*
+
+*   **Option A: Shared Volume (Recommended)**
+    1.  Rent a cheap "Standard" instance (e.g., 1x RTX 3060 or a CPU-only instance) with a large network volume (e.g., 100GB).
+    2.  Run stages 0 through 6 to produce the final dataset.
+    3.  Stop the instance but **keep the volume**.
+    4.  Deploy a "Secure Cloud" H100 instance and **attach the same volume**.
+    5.  Run stage 9 (Full-Scale Training).
+
+*   **Option B: Local Preparation & Upload**
+    1.  Run stages 0 through 6 on your local machine.
+    2.  Copy the following data to the RunPod instance via SCP or the RunPod web terminal:
+        *   `dataset/` (The entire versioned dataset directory)
+        *   `pipeline.yaml`
+        *   `pipeline/`
+        *   `requirements.txt`
+        *   `scripts/runpod_setup.sh`
+
+### 2. Setup on RunPod
+Once logged into your H100 instance:
+
+```bash
+# Clone the repository (if not already copied)
+git clone <your-repo-url> drupalgym
+cd drupalgym
+
+# Run the setup script
+bash scripts/runpod_setup.sh
+
+# Enter the virtual environment
+source venv/bin/activate
+```
+
+### 3. Running the 20-Hour Training
+The `pipeline.yaml` is configured with `full_scale` targets for `Qwen2.5-Coder-7B`. To execute the 20-hour session:
+
+```bash
+python3 -m pipeline run 9
+```
+
+**Optimization for 20 Hours:**
+To ensure the session lasts approximately 20 hours on a single H100, the following adjustments were made:
+- **Data Volume:** Increased `limit` to `1000` projects to target ~100k+ samples.
+- **Context Length:** Set `max_seq_len: 8192` to maximize H100 utilization.
+- **Batch Size:** Total effective batch size of 64 (`per_device_train_batch_size: 4` * `gradient_accumulation_steps: 16`).
+- **Duration:** With ~100k samples and 3 epochs, the training is estimated to run for ~18-22 hours depending on the final filtered dataset size.
+
+If you need to extend the duration further, increase `num_train_epochs` or `gradient_accumulation_steps` in `pipeline.yaml`.
+
+### 4. Monitoring
+Use TensorBoard to monitor the training progress:
+```bash
+tensorboard --logdir manifests/ --port 6006
+```
+(You will need to map port 6006 in your RunPod settings to access the UI).
+
 ## Project Structure
 - `pipeline/`: Core logic and CLI implementation.
 - `pipeline.yaml`: Pipeline configuration.
