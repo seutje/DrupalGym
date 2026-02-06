@@ -35,6 +35,7 @@ models/
 sources/
 !sources/
 !sources/manifest.json
+eval/
 
 # Pipeline Logs and Manifests
 manifests/*.jsonl

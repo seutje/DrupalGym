@@ -44,7 +44,7 @@ def patch_torch_matmul():
         return torch.matmul_orig(a, b, out=out)
     torch.matmul = patched_matmul
 
-patch_torch_matmul()
+# patch_torch_matmul()
 
 from pathlib import Path
 from datasets import load_dataset
