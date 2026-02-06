@@ -96,6 +96,10 @@ export:
   quantization:
     gguf: ["Q4_K_M", "Q8_0"]
   merge_adapters: true
+  tools:
+    llama_cpp_dir:
+    convert_hf_to_gguf:
+    llama_quantize:
 
 models:
   - name: "Qwen2.5-Coder-7B"

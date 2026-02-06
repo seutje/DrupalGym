@@ -1,8 +1,13 @@
-import os
-import torch
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+import json
+
+import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from .logger import PipelineLogger
 
 def run_export_stage(config: dict, logger: PipelineLogger, root: Path):
@@ -55,6 +60,8 @@ def run_export_stage(config: dict, logger: PipelineLogger, root: Path):
         
         try:
             export_model(base_model_name, adapter_path, output_path, export_cfg, logger)
+            if "gguf" in export_cfg.get("formats", []):
+                quantize_to_gguf(output_path, export_cfg, logger)
         except Exception as e:
             logger.error(f"Export failed for {model_name}: {str(e)}")
             
@@ -86,8 +93,123 @@ def export_model(base_model_name: str, adapter_path: Path, output_path: Path, ex
     tokenizer.save_pretrained(str(output_path))
     
     logger.info(f"Exported to {output_path}")
-    
-    # TODO: Implement GGUF quantization if requested
-    if "gguf" in export_cfg.get("formats", []):
-        logger.info("GGUF format requested. Note: GGUF conversion requires llama.cpp scripts.")
-        # We could potentially call a shell script here if llama.cpp is present
+
+
+def _resolve_tool_path(configured_path: str | None, candidates: list[str]) -> str | None:
+    if configured_path:
+        tool = Path(configured_path).expanduser()
+        if tool.exists():
+            return str(tool)
+
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+
+    return None
+
+
+def _run_command(command: list[str], logger: PipelineLogger, fail_message: str):
+    rendered = " ".join(command)
+    logger.info(f"Running command: {rendered}")
+    result = subprocess.run(command, capture_output=True, text=True)
+
+    if result.stdout:
+        logger.info(result.stdout.strip())
+    if result.stderr:
+        logger.info(result.stderr.strip())
+
+    if result.returncode != 0:
+        raise RuntimeError(f"{fail_message}: exit code {result.returncode}")
+
+
+def quantize_to_gguf(exported_model_dir: Path, export_cfg: dict, logger: PipelineLogger):
+    if not exported_model_dir.exists():
+        raise FileNotFoundError(f"Export directory not found: {exported_model_dir}")
+
+    gguf_quants = export_cfg.get("quantization", {}).get("gguf", [])
+    if not gguf_quants:
+        logger.info("No GGUF quantization targets configured. Skipping.")
+        return
+
+    tool_cfg = export_cfg.get("tools", {})
+    llama_cpp_dir = tool_cfg.get("llama_cpp_dir")
+
+    convert_candidates = ["convert_hf_to_gguf.py"]
+    quantize_candidates = ["llama-quantize", "quantize"]
+
+    if llama_cpp_dir:
+        convert_candidates.insert(0, str(Path(llama_cpp_dir) / "convert_hf_to_gguf.py"))
+        quantize_candidates.insert(0, str(Path(llama_cpp_dir) / "build" / "bin" / "llama-quantize"))
+        quantize_candidates.insert(1, str(Path(llama_cpp_dir) / "build" / "bin" / "quantize"))
+
+    convert_script = _resolve_tool_path(tool_cfg.get("convert_hf_to_gguf"), convert_candidates)
+    if not convert_script:
+        raise RuntimeError(
+            "Unable to locate convert_hf_to_gguf.py. Configure export.tools.convert_hf_to_gguf "
+            "or export.tools.llama_cpp_dir in pipeline.yaml."
+        )
+
+    quantize_bin = _resolve_tool_path(tool_cfg.get("llama_quantize"), quantize_candidates)
+    if not quantize_bin:
+        raise RuntimeError(
+            "Unable to locate llama-quantize. Configure export.tools.llama_quantize "
+            "or export.tools.llama_cpp_dir in pipeline.yaml."
+        )
+
+    _normalize_tokenizer_config_for_conversion(exported_model_dir, logger)
+
+    f16_file = exported_model_dir / "model-f16.gguf"
+    convert_command = [
+        sys.executable,
+        convert_script,
+        str(exported_model_dir),
+        "--outfile",
+        str(f16_file),
+        "--outtype",
+        "f16",
+    ]
+    _run_command(convert_command, logger, "GGUF conversion failed")
+
+    generated = [f16_file.name]
+    for quant in gguf_quants:
+        quant_file = exported_model_dir / f"model-{quant.lower()}.gguf"
+        quant_command = [
+            quantize_bin,
+            str(f16_file),
+            str(quant_file),
+            quant,
+        ]
+        _run_command(quant_command, logger, f"GGUF quantization failed for {quant}")
+        generated.append(quant_file.name)
+
+    logger.info(
+        f"Generated GGUF files in {exported_model_dir}: {', '.join(generated)}",
+        gguf_files=generated,
+    )
+
+
+def _normalize_tokenizer_config_for_conversion(exported_model_dir: Path, logger: PipelineLogger):
+    tokenizer_config_path = exported_model_dir / "tokenizer_config.json"
+    if not tokenizer_config_path.exists():
+        return
+
+    with tokenizer_config_path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    extra_special_tokens = config.get("extra_special_tokens")
+    if not isinstance(extra_special_tokens, list):
+        return
+
+    if "additional_special_tokens" not in config:
+        config["additional_special_tokens"] = extra_special_tokens
+    config.pop("extra_special_tokens", None)
+
+    with tokenizer_config_path.open("w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+
+    logger.info(
+        "Normalized tokenizer_config.json for GGUF conversion compatibility",
+        tokenizer_config=str(tokenizer_config_path),
+    )

@@ -153,13 +153,14 @@ python3 -m pipeline run 9
 What it does: currently logs a placeholder message only.
 Outputs: none yet.
 
-**Stage 10: Export and Quantization (placeholder)**
+**Stage 10: Export and Quantization**
 Command:
 ```bash
 python3 -m pipeline run 10
 ```
-What it does: currently logs a placeholder message only.
-Outputs: none yet.
+Prereqs: trained adapters under `models/<model>/{test_run|final}/adapter/`, and llama.cpp conversion tools available on PATH or configured in `pipeline.yaml` under `export.tools`.
+What it does: exports adapters as safetensors, optionally merges into base models, converts merged weights to `model-f16.gguf`, and generates configured GGUF quantizations (for example `Q4_K_M`, `Q8_0`).
+Outputs: files under `models/<model>/{test_run|final}/exported/` including `model-f16.gguf` and quantized GGUF variants.
 
 **Stage 11: Automation and Hardening (placeholder)**
 Command:
