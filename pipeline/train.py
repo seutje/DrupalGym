@@ -133,11 +133,13 @@ def train_model(
         per_device_eval_batch_size=train_cfg["per_device_eval_batch_size"],
         gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
         learning_rate=train_cfg["learning_rate"],
-        num_train_epochs=1,
-        max_steps=train_cfg["max_steps"],
+        num_train_epochs=train_cfg.get("num_train_epochs", 1),
+        max_steps=train_cfg.get("max_steps", -1),
         logging_steps=train_cfg["logging_steps"],
         eval_strategy=train_cfg["eval_strategy"],
+        eval_steps=train_cfg.get("eval_steps"),
         save_strategy=train_cfg["save_strategy"],
+        save_steps=train_cfg.get("save_steps"),
         fp16=train_cfg["fp16"],
         bf16=train_cfg["bf16"],
         optim="paged_adamw_8bit",
@@ -165,7 +167,7 @@ def train_model(
     model.save_pretrained(str(output_dir / "adapter"))
     logger.info(f"Training completed for {model_name}. Adapter saved to {output_dir / 'adapter'}")
 
-def run_training_stage(config: dict, logger: PipelineLogger, root: Path):
+def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: str = "test_run"):
     if not torch.cuda.is_available():
         logger.error("CUDA is not available. GPU is required for training.")
         return 1
@@ -180,7 +182,7 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path):
     dataset_dir = root / "dataset" / dataset_version
     models_dir = root / "models"
     
-    default_test_cfg = {
+    default_cfg = {
         "max_seq_len": 512,
         "max_steps": 5,
         "per_device_train_batch_size": 1,
@@ -202,21 +204,24 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path):
         "bnb_4bit_compute_dtype": "float32",
         "max_models": 1,
     }
-    train_cfg = default_test_cfg | config.get("training", {}).get("test_run", {})
+    train_cfg = default_cfg | config.get("training", {}).get(mode, {})
     
     models_to_train = train_cfg.get("models", config.get("models", []))
     if not models_to_train:
         logger.error("No models defined in configuration.")
         return 1
-    models_to_train = models_to_train[: int(train_cfg["max_models"])]
+    
+    max_models = int(train_cfg.get("max_models", len(models_to_train)))
+    models_to_train = models_to_train[:max_models]
 
     for model_cfg in models_to_train:
         torch.cuda.empty_cache()
         model_name = model_cfg["name"]
-        output_dir = models_dir / model_name / "test_run"
+        suffix = "test_run" if mode == "test_run" else "final"
+        output_dir = models_dir / model_name / suffix
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"Starting actual training for {model_name}...")
+        logger.info(f"Starting {mode} training for {model_name}...")
         try:
             train_model(model_cfg, dataset_dir, output_dir, logger, train_cfg)
         except Exception as e:

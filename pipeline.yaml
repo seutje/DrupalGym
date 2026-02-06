@@ -63,6 +63,35 @@ training:
       - name: "Qwen2.5-Coder-3B-Test"
         base_model: "Qwen/Qwen2.5-Coder-3B"
         training_type: "QLoRA"
+  full_scale:
+    max_seq_len: 8192
+    num_train_epochs: 3
+    per_device_train_batch_size: 4
+    per_device_eval_batch_size: 4
+    gradient_accumulation_steps: 8
+    learning_rate: 0.0002
+    logging_steps: 10
+    eval_strategy: "steps"
+    eval_steps: 100
+    save_strategy: "steps"
+    save_steps: 100
+    fp16: false
+    bf16: true
+    gradient_checkpointing: true
+    use_reentrant_gc: false
+    group_by_length: true
+    lora_r: 64
+    lora_alpha: 128
+    lora_dropout: 0.05
+    lora_target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    bnb_4bit_compute_dtype: "bfloat16"
+    max_models: 2
+
+export:
+  formats: ["safetensors", "gguf"]
+  quantization:
+    gguf: ["Q4_K_M", "Q8_0"]
+  merge_adapters: true
 
 models:
   - name: "Qwen2.5-Coder-7B"

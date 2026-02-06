@@ -31,15 +31,14 @@ def run_stage(stage_name: str, config: dict):
     elif stage_name in {"6", "phase6", "dataset"}:
         return run_packaging_stage(config, logger, root)
     elif stage_name in {"7", "phase7", "train"}:
-        return run_training_stage(config, logger, root)
+        return run_training_stage(config, logger, root, mode="test_run")
     elif stage_name in {"8", "phase8", "eval"}:
         return run_evaluation_stage(config, logger, root)
     elif stage_name in {"9", "phase9", "full_train"}:
-        logger.info("Phase 9: Full-scale training would run here with H100 config.")
-        return 0
+        return run_training_stage(config, logger, root, mode="full_scale")
     elif stage_name in {"10", "phase10", "export"}:
-        logger.info("Phase 10: Export and quantization would run here.")
-        return 0
+        from .export import run_export_stage
+        return run_export_stage(config, logger, root)
     elif stage_name in {"11", "phase11", "hardening"}:
         logger.info("Phase 11: Automation and reproducibility hardening.")
         return 0
