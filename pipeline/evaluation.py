@@ -37,6 +37,8 @@ DEFAULT_PROMPT_SUITE = [
         "input": "",
     },
 ]
+PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
+NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 
 
 def _iso_timestamp() -> str:
@@ -129,6 +131,41 @@ def _extract_code_blocks(output: str) -> list[str]:
     if "<?php" in output:
         return [output.strip()]
     return []
+
+
+def _compute_format_sanity(output: str) -> dict[str, Any]:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    numeric_streak = 0
+    current_streak = 0
+    counts: dict[str, int] = {}
+    for line in lines:
+        counts[line] = counts.get(line, 0) + 1
+        if NUMERIC_LINE_RE.match(line):
+            current_streak += 1
+            if current_streak > numeric_streak:
+                numeric_streak = current_streak
+        else:
+            current_streak = 0
+
+    repeated_line_ratio = (max(counts.values()) / len(lines)) if len(lines) >= 20 and counts else 0.0
+    has_prompt_wrapper_echo = bool(PROMPT_WRAPPER_RE.search(output))
+
+    penalties = 0.0
+    if has_prompt_wrapper_echo:
+        penalties += 0.6
+    if numeric_streak >= 40:
+        penalties += 0.4
+    if repeated_line_ratio >= 0.25:
+        penalties += 0.2
+
+    score = max(0.0, round(1.0 - penalties, 4))
+    return {
+        "score": score,
+        "has_prompt_wrapper_echo": has_prompt_wrapper_echo,
+        "numeric_line_streak": numeric_streak,
+        "repeated_line_ratio": round(repeated_line_ratio, 4),
+        "is_sane": score >= 0.8,
+    }
 
 
 def _required_checks_for_prompt(prompt_id: str, output: str) -> tuple[dict[str, bool], list[str]]:
@@ -373,6 +410,8 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
         fine_scores = [float(item["score"]) for item in fine]
         base_scores = [float(item["score"]) for item in base]
+        fine_format_scores = [float(item.get("format_sanity", {}).get("score", 1.0)) for item in fine]
+        base_format_scores = [float(item.get("format_sanity", {}).get("score", 1.0)) for item in base]
         all_fine_scores.extend(fine_scores)
         all_base_scores.extend(base_scores)
 
@@ -413,6 +452,15 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "delta_avg_score": round(fine_avg - base_avg, 4),
                 "fine_tuned_pass_rate": _average([1.0 if item["passed"] else 0.0 for item in fine]),
                 "baseline_pass_rate": _average([1.0 if item["passed"] else 0.0 for item in base]),
+                "fine_tuned_format_sanity_avg": _average(fine_format_scores),
+                "baseline_format_sanity_avg": _average(base_format_scores),
+                "delta_format_sanity_avg": round(_average(fine_format_scores) - _average(base_format_scores), 4),
+                "fine_tuned_format_sanity_fail_rate": _average(
+                    [1.0 if not item.get("format_sanity", {}).get("is_sane", True) else 0.0 for item in fine]
+                ),
+                "baseline_format_sanity_fail_rate": _average(
+                    [1.0 if not item.get("format_sanity", {}).get("is_sane", True) else 0.0 for item in base]
+                ),
                 "fine_tuned_wins": fine_wins,
                 "baseline_wins": baseline_wins,
                 "ties": ties,
@@ -651,6 +699,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
 
                     checks, required = _required_checks_for_prompt(prompt_id, output)
                     external_checks = _run_external_checks(output, eval_cfg)
+                    format_sanity = _compute_format_sanity(output)
                     score = _score_result(checks, required, external_checks)
 
                     output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}.txt"
@@ -671,6 +720,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         "checks": checks,
                         "required_checks": required,
                         "external_checks": external_checks,
+                        "format_sanity": format_sanity,
                     }
                     result.update(score)
                     all_results.append(result)

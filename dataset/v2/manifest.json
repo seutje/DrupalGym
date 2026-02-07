@@ -1,69 +1,77 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-07T18:46:56Z",
+  "timestamp": "2026-02-07T19:38:49Z",
   "inputs": [
     {
       "name": "v1_train",
       "version": "v1",
-      "hash": "210dfcaddaa583b8567fcdbe2a3dad3ae55fa0846123cbc384f7da9656cfc7c9"
+      "hash": "cac2df83ee8b5364876fcded48a68290c5c87d1199cded3067a1528e05dcbae3"
     },
     {
       "name": "v1_valid",
       "version": "v1",
-      "hash": "d3b75d555c048ff7cd087bb325b11618468ca701180830c755642426b7b40448"
+      "hash": "831651aaede83191e032210418347f4307da849340c9a7e584e637b2e146e813"
     },
     {
       "name": "v1_test",
       "version": "v1",
-      "hash": "c54c73fa13c764c9504837eb434013b9d61ec24d65067233378e62cbe48f51a5"
+      "hash": "77eb9febd859d46935da43d32b0dced610a77671309357b49c672b9b8db501a0"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "2c09aa83120e43fa9150c464918eb28c2b52193393aba7be1a2a255cfb8cc8a2"
+      "hash": "2fd9dee0f34986e5d1da87853b25cbee2adbd602df5871a2604d2e7ee6bdccb8"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "68e884cbd90823cd9936a218561f12a695f03c0f1be113a3784f612815b92bb2"
+      "hash": "f3197ace02434c873ecfd75eb81a40e2db1f0b4b50e288ead2ddd9e2720eccc3"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "3e214279a0802cdff6a151de2f93ed035c3551fead483bd9e2d721c0dfcf41d6"
+      "hash": "5827c5a1cd9d3ad3ca71505009306ec2445566d4cd2cca895b5c0416ecc018f5"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "cf33c20a3b66288df1a8694a388fb42de53d8805e36013a8c3aa2f62d1c5aea9"
+      "hash": "62ccc948ceab950b01add220d6bcb43570ed2fef1b0aaaf897247025b646e75d"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
-      "hash": "6c7d7221cd90abe04de6598366d296df44428024106a1aacf66f066f3364af94"
+      "hash": "88a70d0047a638703834ace327596e95b233745f9f60fda2430c0800fb30f030"
+    },
+    "training_pool_clean": {
+      "path": "dataset/v2/training_pool_clean.jsonl",
+      "hash": "db0d3b66881a09497ad15ce61edf2505fc4a8d61be7317ead4caee74f1a0466c"
+    },
+    "training_pool_experimental": {
+      "path": "dataset/v2/training_pool_experimental.jsonl",
+      "hash": "ac0d9b3fa315b40b16c05c0d36db088181e7fcebc3d029f8e4737740e6c507bc"
     }
   },
   "metrics": {
-    "input_total": 18223,
-    "filtered_total": 16309,
-    "chunked_source_records": 1504,
-    "chunked_total_records": 18213,
-    "rebalanced_total_records": 10239,
+    "input_total": 18076,
+    "filtered_total": 16159,
+    "chunked_source_records": 1456,
+    "chunked_total_records": 17964,
+    "rebalanced_total_records": 10076,
     "dropped_test_records": 0,
-    "augmented_records": 3590,
-    "augmentation_candidate_pool": 4787,
-    "final_total": 13829,
-    "test_ratio_before_rebalance": 0.4378,
+    "augmented_records": 3587,
+    "augmentation_candidate_pool": 4783,
+    "final_total": 13663,
+    "test_ratio_before_rebalance": 0.4391,
     "test_ratio_after_rebalance": 0.0,
-    "split_train": 11062,
-    "split_valid": 1382,
-    "split_test": 1385,
-    "eval_candidate_pool_size": 7974,
+    "split_train": 10929,
+    "split_valid": 1366,
+    "split_test": 1368,
+    "eval_candidate_pool_size": 7888,
     "exclude_test_sources_from_training_pool": true,
     "yield_breakdown": {
-      "input_records": 18223,
-      "after_validation_filter": 16309,
-      "after_chunking": 18213,
-      "after_test_pool_extraction": 10239,
-      "after_augmentation": 13829,
-      "rejected_records": 1914
+      "input_records": 18076,
+      "after_validation_filter": 16159,
+      "after_chunking": 17964,
+      "after_test_pool_extraction": 10076,
+      "after_augmentation": 13663,
+      "rejected_records": 1917
     },
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
@@ -85,21 +93,24 @@
       ]
     },
     "rejection_reasons": {
-      "malformed_instruction_class_slot": 1909,
-      "class_interface_mismatch": 3,
+      "malformed_instruction_class_slot": 1908,
+      "truncation_artifact": 4,
       "class_trait_mismatch": 1,
       "class_enum_mismatch": 1,
-      "augmentation_non_php_source": 4209,
-      "augmentation_chunked_source": 556,
-      "augmentation_non_php_output": 687
+      "class_interface_mismatch": 3,
+      "augmentation_non_php_source": 4064,
+      "augmentation_chunked_source": 551,
+      "augmentation_non_php_output": 678
     },
     "sample_type_distribution": {
-      "retrieval": 10239,
-      "bugfix": 898,
-      "refactor": 898,
+      "retrieval": 10076,
+      "bugfix": 897,
+      "refactor": 897,
       "write_from_spec": 897,
-      "explain_and_implement": 897
-    }
+      "explain_and_implement": 896
+    },
+    "clean_pool_size": 10076,
+    "experimental_pool_size": 3587
   },
   "config": {
     "input_version": "v1",

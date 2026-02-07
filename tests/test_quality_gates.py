@@ -58,6 +58,33 @@ class QualityGateHelpersTest(unittest.TestCase):
         self.assertFalse(ok2)
         self.assertEqual(reason2, "near_duplicate_content")
 
+    def test_prompt_wrapper_echo_rejected(self):
+        sample = {
+            "instruction": "Explain the following topic based on Drupal 11 documentation: Services",
+            "input": "",
+            "output": (
+                "Instruction: build a service.\n"
+                "Input: logger.factory\n"
+                "Output: use constructor injection and return PHP code.\n"
+            ),
+            "metadata": {"source": "doc.md"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "prompt_wrapper_echo")
+
+    def test_numeric_line_streak_rejected(self):
+        numbered = "\n".join(str(i) for i in range(1, 45))
+        sample = {
+            "instruction": "Explain the following topic based on Drupal 11 documentation: Routing",
+            "input": "",
+            "output": numbered,
+            "metadata": {"source": "doc.md"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "numeric_line_streak")
+
 
 if __name__ == "__main__":
     unittest.main()

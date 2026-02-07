@@ -1,32 +1,32 @@
 {
   "stage": "dataset_packaging",
-  "timestamp": "2026-02-07T18:46:43Z",
+  "timestamp": "2026-02-07T19:38:43Z",
   "inputs": [
     {
       "name": "passed_sft",
       "version": "1.0",
-      "hash": "e8332c48e2baf62d6346c1d286839aab62d76fde724034b5f23c38cc92577217"
+      "hash": "542e60844684c5f7c9bd47e3d9cfe987c7f48f092426594bf8e5bace98d39f67"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v1/train.jsonl",
-      "hash": "210dfcaddaa583b8567fcdbe2a3dad3ae55fa0846123cbc384f7da9656cfc7c9"
+      "hash": "cac2df83ee8b5364876fcded48a68290c5c87d1199cded3067a1528e05dcbae3"
     },
     "valid_split": {
       "path": "dataset/v1/valid.jsonl",
-      "hash": "d3b75d555c048ff7cd087bb325b11618468ca701180830c755642426b7b40448"
+      "hash": "831651aaede83191e032210418347f4307da849340c9a7e584e637b2e146e813"
     },
     "test_split": {
       "path": "dataset/v1/test.jsonl",
-      "hash": "c54c73fa13c764c9504837eb434013b9d61ec24d65067233378e62cbe48f51a5"
+      "hash": "77eb9febd859d46935da43d32b0dced610a77671309357b49c672b9b8db501a0"
     }
   },
   "metrics": {
-    "train": 14578,
-    "valid": 1822,
-    "test": 1823,
-    "total": 18223
+    "train": 14460,
+    "valid": 1807,
+    "test": 1809,
+    "total": 18076
   },
   "config": {}
 }

@@ -146,9 +146,9 @@ def train_model(
         report_to="tensorboard",
         gradient_checkpointing=train_cfg["gradient_checkpointing"],
         gradient_checkpointing_kwargs={"use_reentrant": train_cfg["use_reentrant_gc"]},
-        max_grad_norm=0.3,
-        warmup_ratio=0.03,
-        lr_scheduler_type="cosine",
+        max_grad_norm=float(train_cfg.get("max_grad_norm", 0.3)),
+        warmup_ratio=float(train_cfg.get("warmup_ratio", 0.03)),
+        lr_scheduler_type=str(train_cfg.get("lr_scheduler_type", "cosine")),
         group_by_length=train_cfg["group_by_length"],
     )
 
@@ -205,6 +205,9 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
         "lora_dropout": 0.05,
         "lora_target_modules": ["q_proj", "v_proj"],
         "bnb_4bit_compute_dtype": "float32",
+        "max_grad_norm": 0.3,
+        "warmup_ratio": 0.03,
+        "lr_scheduler_type": "cosine",
         "max_models": 1,
     }
     train_cfg = default_cfg | config.get("training", {}).get(mode, {})

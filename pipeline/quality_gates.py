@@ -12,6 +12,8 @@ from .manifest import Manifest, calculate_hash
 SYMBOL_PROMPT_RE = re.compile(
     r"^Show me the implementation of the (class|interface|trait|enum) ([A-Za-z_][A-Za-z0-9_]*) in the file (.+)\.$"
 )
+PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
+NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 
 
 class QualityGate:
@@ -22,11 +24,38 @@ class QualityGate:
         self.max_output_chars = int(cfg.get("max_output_chars", 50000))
         self.run_php_lint = bool(cfg.get("run_php_lint", False))
         self.php_bin = shutil.which("php") if self.run_php_lint else None
+        self.reject_prompt_wrapper_echo = bool(cfg.get("reject_prompt_wrapper_echo", True))
+        self.max_numeric_line_streak = int(cfg.get("max_numeric_line_streak", 40))
+        self.max_repeated_line_ratio = float(cfg.get("max_repeated_line_ratio", 0.25))
 
         self.rejected_count = 0
         self.passed_count = 0
         self.reasons: dict[str, int] = {}
         self.seen_output_hashes: set[str] = set()
+
+    @staticmethod
+    def _numeric_line_streak(output: str) -> int:
+        max_streak = 0
+        current = 0
+        for line in output.splitlines():
+            if NUMERIC_LINE_RE.match(line.strip()):
+                current += 1
+                if current > max_streak:
+                    max_streak = current
+            else:
+                current = 0
+        return max_streak
+
+    @staticmethod
+    def _repeated_line_ratio(output: str) -> float:
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        if len(lines) < 20:
+            return 0.0
+        counts: dict[str, int] = {}
+        for line in lines:
+            counts[line] = counts.get(line, 0) + 1
+        max_count = max(counts.values(), default=0)
+        return max_count / len(lines) if lines else 0.0
 
     def _php_lint_ok(self, output: str) -> bool:
         if not self.run_php_lint or not self.php_bin:
@@ -59,6 +88,16 @@ class QualityGate:
             return False, "too_short"
         if len(output) > self.max_output_chars:
             return False, "too_long"
+        if self.reject_prompt_wrapper_echo and PROMPT_WRAPPER_RE.search(output):
+            return False, "prompt_wrapper_echo"
+
+        numeric_streak = self._numeric_line_streak(output)
+        if numeric_streak >= self.max_numeric_line_streak:
+            return False, "numeric_line_streak"
+
+        repeated_ratio = self._repeated_line_ratio(output)
+        if repeated_ratio >= self.max_repeated_line_ratio:
+            return False, "repetitive_output"
 
         output_hash = __import__("hashlib").sha256(output.encode("utf-8", errors="ignore")).hexdigest()
         if output_hash in self.seen_output_hashes:

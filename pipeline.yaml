@@ -151,7 +151,7 @@ training:
 
 evaluation:
   seed: 42
-  mode: "test_run"
+  mode: "full_scale"
   max_new_tokens: 512
   device: "auto"
   max_models: 1

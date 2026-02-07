@@ -16,6 +16,8 @@ DECLARATION_RE = re.compile(r"\b(class|interface|trait|enum)\s+([A-Za-z_][A-Za-z
 NAMESPACE_RE = re.compile(r"^namespace\s+([^;]+);", re.MULTILINE)
 USE_RE = re.compile(r"^use\s+([^;]+);", re.MULTILINE)
 METHOD_RE = re.compile(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
+NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 
 
 def _load_split_records(split_path: Path, split_name: str) -> list[dict[str, Any]]:
@@ -101,6 +103,7 @@ def _detect_symbol_kind_and_name(sample: dict[str, Any]) -> tuple[str, str]:
 def _validate_sample(sample: dict[str, Any]) -> tuple[bool, str]:
     instruction = str(sample.get("instruction", "")).strip()
     source = str(sample.get("metadata", {}).get("source", "")).lower()
+    output = str(sample.get("output", ""))
     prompt_match = RETRIEVAL_PROMPT_RE.match(instruction)
 
     if prompt_match:
@@ -125,6 +128,27 @@ def _validate_sample(sample: dict[str, Any]) -> tuple[bool, str]:
         kind, _name = _detect_symbol_kind_and_name(sample)
         if kind in {"interface", "trait", "enum"}:
             return False, f"class_{kind}_mismatch"
+
+    if PROMPT_WRAPPER_RE.search(output):
+        return False, "contains_prompt_wrapper_echo"
+
+    max_numeric_streak = 0
+    current_streak = 0
+    for line in output.splitlines():
+        if NUMERIC_LINE_RE.match(line.strip()):
+            current_streak += 1
+            if current_streak > max_numeric_streak:
+                max_numeric_streak = current_streak
+        else:
+            current_streak = 0
+    if max_numeric_streak >= 40:
+        return False, "numeric_line_streak_artifact"
+
+    stripped = output.rstrip()
+    if stripped.count("```") % 2 != 0:
+        return False, "truncation_artifact"
+    if stripped.endswith(("Input:", "Output:", "Instruction:")):
+        return False, "truncation_artifact"
 
     return True, ""
 
@@ -613,6 +637,22 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         calculate_hash(eval_candidate_path),
     )
 
+    clean_pool_path = output_dir / "training_pool_clean.jsonl"
+    _write_jsonl(clean_pool_path, rebalanced_records)
+    manifest.add_output(
+        "training_pool_clean",
+        f"dataset/{refine_cfg['output_version']}/training_pool_clean.jsonl",
+        calculate_hash(clean_pool_path),
+    )
+
+    experimental_pool_path = output_dir / "training_pool_experimental.jsonl"
+    _write_jsonl(experimental_pool_path, augmented_records)
+    manifest.add_output(
+        "training_pool_experimental",
+        f"dataset/{refine_cfg['output_version']}/training_pool_experimental.jsonl",
+        calculate_hash(experimental_pool_path),
+    )
+
     sample_type_distribution: dict[str, int] = {"retrieval": 0}
     for sample in augmented_records:
         aug_type = sample.get("metadata", {}).get("refinement", {}).get("augmentation_type", "unknown")
@@ -649,6 +689,8 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "feedback_targets": feedback_targets,
         "rejection_reasons": rejection_reasons,
         "sample_type_distribution": sample_type_distribution,
+        "clean_pool_size": len(rebalanced_records),
+        "experimental_pool_size": len(augmented_records),
     }
     manifest.set_metrics(metrics)
     manifest.save()

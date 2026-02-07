@@ -156,6 +156,28 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "augmentation_chunked_source")
 
+    def test_validate_rejects_prompt_wrapper_echo_in_output(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+            "input": "",
+            "output": "Instruction: x\nInput: y\nOutput: z\n",
+            "metadata": {"source": "repos/example/src/Example.php"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "contains_prompt_wrapper_echo")
+
+    def test_validate_rejects_numeric_line_streak_artifact(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+            "input": "",
+            "output": "\n".join(str(i) for i in range(1, 45)),
+            "metadata": {"source": "repos/example/src/Example.php"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "numeric_line_streak_artifact")
+
 
 if __name__ == "__main__":
     unittest.main()
