@@ -82,7 +82,7 @@ training:
         base_model: "Qwen/Qwen2.5-Coder-3B"
         training_type: "QLoRA"
   full_scale:
-    max_seq_len: 3072
+    max_seq_len: 2048
     num_train_epochs: 3
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
