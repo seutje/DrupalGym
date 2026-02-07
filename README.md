@@ -151,9 +151,9 @@ Command:
 ```bash
 python3 -m pipeline run 8
 ```
-Prereqs: none (currently simulated outputs).
-What it does: runs a small prompt suite and writes placeholder outputs and metrics.
-Outputs: `eval/metrics.json`, `eval/sample_outputs/*.txt`.
+Prereqs: trained adapter at `models/<model>/{test_run|final}/adapter/` for the configured evaluation mode.
+What it does: runs a targeted Drupal 11 prompt suite (attributes, DI, routing, SDC), generates fine-tuned and baseline outputs, runs automated checks (required prompt checks plus optional PHP lint/PHPCS), and writes comparison metrics.
+Outputs: `eval/metrics.json`, `eval/sample_outputs/`, `eval/sample_outputs/index.json`, `eval/manifest.json`.
 
 **Stage 9: Full-Scale Training (placeholder)**
 Command:

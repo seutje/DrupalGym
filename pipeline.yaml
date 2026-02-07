@@ -109,6 +109,16 @@ training:
         base_model: "Qwen/Qwen2.5-Coder-7B"
         training_type: "QLoRA"
 
+evaluation:
+  seed: 42
+  mode: "test_run"
+  max_new_tokens: 512
+  device: "auto"
+  max_models: 1
+  run_php_lint: true
+  run_phpcs: false
+  max_code_checks_per_response: 3
+
 export:
   formats: ["safetensors", "gguf"]
   quantization:
