@@ -1,0 +1,87 @@
+{
+  "stage": "dataset_refinement",
+  "timestamp": "2026-02-07T12:04:28Z",
+  "inputs": [
+    {
+      "name": "v1_train",
+      "version": "v1",
+      "hash": "ce56da5be54cca0a4bded9e5ee0158a147abdcc417d658daefca4d876c1f4e0f"
+    },
+    {
+      "name": "v1_valid",
+      "version": "v1",
+      "hash": "5fbccfaa763337ae0f4ae202c3ab55190ebba48120652ba788d992770ad99a3d"
+    },
+    {
+      "name": "v1_test",
+      "version": "v1",
+      "hash": "8c746817a86c8df63b4a817092f75029ece9d63ec05d6bfe537096a533c1c151"
+    }
+  ],
+  "outputs": {
+    "train_split": {
+      "path": "dataset/v2/train.jsonl",
+      "hash": "836669a7c64055b6a3a2fd82089180ec0fc0ca034f11a9c696bc06ebe14c7119"
+    },
+    "valid_split": {
+      "path": "dataset/v2/valid.jsonl",
+      "hash": "6edafa05fcde116b7685d73fca319089f18abdbf16a528d9e0c772f055b41b9f"
+    },
+    "test_split": {
+      "path": "dataset/v2/test.jsonl",
+      "hash": "decbd9d79bdbe63923c21c03ae9ec11a103b8efac46ff179e3ba1ae47290ca22"
+    },
+    "rejected_samples": {
+      "path": "dataset/v2/rejected.jsonl",
+      "hash": "5b28a851c677936acbbf510a6d41a0fada1fbb55eec9e6c12a947a275eef27d9"
+    }
+  },
+  "metrics": {
+    "input_total": 12166,
+    "filtered_total": 11047,
+    "chunked_source_records": 1330,
+    "chunked_total_records": 12973,
+    "rebalanced_total_records": 8917,
+    "dropped_test_records": 4056,
+    "augmented_records": 3745,
+    "final_total": 12662,
+    "test_ratio_before_rebalance": 0.5188,
+    "test_ratio_after_rebalance": 0.3,
+    "split_train": 10129,
+    "split_valid": 1266,
+    "split_test": 1267,
+    "rejection_reasons": {
+      "malformed_instruction_class_slot": 1069,
+      "class_interface_mismatch": 46,
+      "class_enum_mismatch": 2,
+      "class_trait_mismatch": 2,
+      "test_rebalance_drop": 4056
+    },
+    "sample_type_distribution": {
+      "retrieval": 8917,
+      "bugfix": 937,
+      "refactor": 936,
+      "write_from_spec": 936,
+      "explain_and_implement": 936
+    }
+  },
+  "config": {
+    "input_version": "v1",
+    "output_version": "v2",
+    "seed": 42,
+    "max_output_lines": 300,
+    "chunk_overlap_lines": 30,
+    "target_test_ratio": 0.3,
+    "augmentation": {
+      "enabled": true,
+      "ratio": 0.6,
+      "input_excerpt_lines": 120,
+      "types": [
+        "bugfix",
+        "refactor",
+        "write_from_spec",
+        "explain_and_implement"
+      ]
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "stage": "dataset_packaging",
+  "timestamp": "2026-02-07T12:04:20Z",
+  "inputs": [
+    {
+      "name": "passed_sft",
+      "version": "1.0",
+      "hash": "0368630ec8fb6a79c88ffb391f0ff98e8b1f7f70e1c12e9aa117dda57d469740"
+    }
+  ],
+  "outputs": {
+    "train_split": {
+      "path": "dataset/v1/train.jsonl",
+      "hash": "ce56da5be54cca0a4bded9e5ee0158a147abdcc417d658daefca4d876c1f4e0f"
+    },
+    "valid_split": {
+      "path": "dataset/v1/valid.jsonl",
+      "hash": "5fbccfaa763337ae0f4ae202c3ab55190ebba48120652ba788d992770ad99a3d"
+    },
+    "test_split": {
+      "path": "dataset/v1/test.jsonl",
+      "hash": "8c746817a86c8df63b4a817092f75029ece9d63ec05d6bfe537096a533c1c151"
+    }
+  },
+  "metrics": {
+    "train": 9732,
+    "valid": 1216,
+    "test": 1218,
+    "total": 12166
+  },
+  "config": {}
+}

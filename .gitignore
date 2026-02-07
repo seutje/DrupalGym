@@ -30,7 +30,6 @@ raw/
 clean/
 sft/
 quality/
-dataset/
 models/
 sources/
 !sources/
