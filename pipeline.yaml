@@ -82,17 +82,17 @@ training:
         base_model: "Qwen/Qwen2.5-Coder-3B"
         training_type: "QLoRA"
   full_scale:
-    max_seq_len: 32768
+    max_seq_len: 3072
     num_train_epochs: 3
-    per_device_train_batch_size: 4
-    per_device_eval_batch_size: 4
-    gradient_accumulation_steps: 16 # Increased for 20h target
+    per_device_train_batch_size: 1
+    per_device_eval_batch_size: 1
+    gradient_accumulation_steps: 32 # L40S-safe effective batch for current dataset volume
     learning_rate: 0.0002
     logging_steps: 10
     eval_strategy: "steps"
-    eval_steps: 500
+    eval_steps: 200
     save_strategy: "steps"
-    save_steps: 500
+    save_steps: 200
     fp16: false
     bf16: true
     gradient_checkpointing: true
@@ -103,7 +103,7 @@ training:
     lora_dropout: 0.05
     lora_target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
     bnb_4bit_compute_dtype: "bfloat16"
-    max_models: 1 # Focus on one model for the 20h session
+    max_models: 1 # Focus on one model for the L40S full_scale session
     models:
       - name: "Qwen2.5-Coder-7B"
         base_model: "Qwen/Qwen2.5-Coder-7B"

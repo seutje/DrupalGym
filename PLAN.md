@@ -119,18 +119,19 @@ Steps
 Human verification
 - Review evaluation samples and metrics for meaningful improvement and Drupal 11 compliance.
 
-## Phase 9: Full-Scale Training (H100)
-Goal: scale training to full dataset and longer context length.
+## Phase 9: Full-Scale Training (L40S Baseline)
+Goal: run stable full-scale single-GPU training on current dataset volume.
 
 Steps
-1. Update QLoRA configs for longer context and larger batch sizes.
-2. Execute training on H100 with the full dataset.
+1. Update QLoRA configs for L40S-safe context and batch settings.
+2. Execute training on a single L40S with the full available dataset.
 3. Validate checkpoints and adapter integrity.
 4. Run the full evaluation suite.
 5. Store final adapters under `models/<model>/final/` with version tags.
 
 Human verification
 - Confirm final training artifacts, evaluation metrics, and reproducibility via manifests.
+- Confirm readiness for future larger-scale runs only after data-gathering pipeline improvements increase dataset volume and quality.
 
 ## Phase 10: Export and Quantization
 Goal: export adapters and optional merged models for deployment.

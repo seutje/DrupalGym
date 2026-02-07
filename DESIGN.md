@@ -1,12 +1,12 @@
 # Design Document: Automated Drupal 11 Training Pipeline for Qwen2.5-Coder and Ministral-3
 
 ## Overview
-This document specifies a reproducible, automated training pipeline that turns Drupal 11 source/Docs into supervised fine-tuning (SFT) and evaluation datasets, trains QLoRA adapters compatible with both **Qwen2.5-Coder (7B)** and **Ministral-3 (8B)**, and supports **consumer-grade hardware** for iterative testing runs before scaling to a rented **H100** for full training. The design prioritizes data quality, automation, traceability, and model-agnostic dataset formats described in the research summary. 【F:RESEARCH.md†L1-L496】
+This document specifies a reproducible, automated training pipeline that turns Drupal 11 source/Docs into supervised fine-tuning (SFT) and evaluation datasets, trains QLoRA adapters compatible with both **Qwen2.5-Coder (7B)** and **Ministral-3 (8B)**, and supports **consumer-grade hardware** plus a single rented **L40S** for full-scale training on current dataset volumes. Future larger-scale runs are tied to improvements in data-gathering throughput and quality. The design prioritizes data quality, automation, traceability, and model-agnostic dataset formats described in the research summary. 【F:RESEARCH.md†L1-L496】
 
 ## Goals
 - **Automate data gathering and curation** for Drupal 11–specific code and documentation.
 - **Provide a single pipeline** that can train and evaluate adapters for **Qwen2.5-Coder** and **Ministral-3**.
-- **Support consumer hardware** (e.g., RTX 4070) for short test runs and small datasets, then **scale to H100** for full runs.
+- **Support consumer hardware** (e.g., RTX 4070) for short test runs and small datasets, then run full-scale training on **single-GPU L40S** for current dataset volumes.
 - **Ensure reproducibility** via versioned manifests, dataset hashes, and pipeline configuration.
 
 ## Non-Goals
@@ -147,10 +147,10 @@ This document specifies a reproducible, automated training pipeline that turns D
 - QLoRA with 4-bit base model.
 - Framework: **Unsloth** for speed/VRAM efficiency. 【F:RESEARCH.md†L281-L315】
 
-**Full Training on H100**
-- Larger dataset (50k–100k samples), longer sequence length (8k–32k).
-- Same QLoRA config but increased batch size and context length.
-- Framework: Unsloth or Axolotl for multi-GPU scalability.
+**Full Training on L40S (Current Baseline)**
+- Current dataset volumes with moderate context length (~2k–4k).
+- QLoRA config tuned for single-GPU stability and reproducibility.
+- Framework: Unsloth or Axolotl-compatible setup.
 
 **Model Compatibility Notes**
 - Use a shared dataset and per-model config:
@@ -213,10 +213,14 @@ This document specifies a reproducible, automated training pipeline that turns D
 - QLoRA 4-bit, seq len 2048.
 - 500–10k samples; 1–3 epochs. 【F:RESEARCH.md†L324-L383】
 
-### H100 (Full Training)
-- Higher batch size and longer context (8k–32k).
-- Full dataset (50k–100k samples).
-- Multi-GPU scaling if needed.
+### L40S (Full Training Baseline)
+- Stable single-GPU full-scale runs for current dataset sizes.
+- Moderate context lengths (2k–4k) with QLoRA.
+- Use this as the default production training target.
+
+### Future Larger-Scale Training
+- Move to larger GPUs and longer contexts only after improving data gathering automation to produce larger, cleaner datasets.
+- Target expansion through source discovery limits, dedup quality, and augmentation correctness.
 
 ---
 
@@ -242,9 +246,9 @@ This document specifies a reproducible, automated training pipeline that turns D
 3. **Phase 3: Training pipeline**
    - Unsloth-based QLoRA configs for both models.
    - Consumer test runs.
-4. **Phase 4: H100 scaling**
-   - Increase dataset + context.
-   - Run full evaluation suite and finalize adapters.
+4. **Phase 4: Scale-up after data pipeline improvements**
+   - Improve source coverage and dataset quality first.
+   - Then increase dataset size/context and run full evaluation suite.
 
 ---
 
@@ -252,4 +256,4 @@ This document specifies a reproducible, automated training pipeline that turns D
 - Fully automated data gathering with Drupal 11 filtering.
 - SFT dataset format compatible with **Qwen2.5-Coder** and **Ministral-3**.
 - Successful test runs on consumer GPU with QLoRA.
-- Repeatable full training on H100 with documented configs and reproducible datasets.
+- Repeatable full training on single-GPU L40S with documented configs and reproducible datasets.

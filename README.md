@@ -155,13 +155,14 @@ Prereqs: trained adapter at `models/<model>/{test_run|final}/adapter/` for the c
 What it does: runs a targeted Drupal 11 prompt suite (attributes, DI, routing, SDC), generates fine-tuned and baseline outputs, runs automated checks (required prompt checks plus optional PHP lint/PHPCS), and writes comparison metrics.
 Outputs: `eval/metrics.json`, `eval/sample_outputs/`, `eval/sample_outputs/index.json`, `eval/manifest.json`.
 
-**Stage 9: Full-Scale Training (placeholder)**
+**Stage 9: Full-Scale Training**
 Command:
 ```bash
 python3 -m pipeline run 9
 ```
-What it does: currently logs a placeholder message only.
-Outputs: none yet.
+Prereqs: CUDA-capable GPU, dataset configured by `dataset.training_version` (default `dataset/v2/`).
+What it does: runs a full-scale QLoRA training pass using `training.full_scale` settings in `pipeline.yaml` (default target: `Qwen2.5-Coder-7B`, tuned for a single L40S RunPod instance).
+Outputs: adapters under `models/<model>/final/adapter/` and logs in `manifests/`.
 
 **Stage 10: Export and Quantization**
 Command:
@@ -182,18 +183,18 @@ Outputs: none yet.
 
 ## RunPod Deployment
 
-To run a full training session (Phase 9) on a RunPod H100 instance while minimizing costs and time, follow these instructions.
+To run a full-scale training session (Phase 9) on a single RunPod L40S instance, follow these instructions.
 
 ### 1. Strategy: Data Preparation vs. Training
-To minimize expensive H100 time, you should prepare the dataset on a cheaper instance or locally.
+To minimize expensive GPU time, prepare the dataset on a cheaper instance or locally first.
 
-*Note: Per user requirements, we assume the entire pipeline (Stages 0-8) runs on the rented RunPod environment, while Stage 9 is the target for the full-scale H100 session.*
+Future larger-scale training should be considered only after improving the data gathering pipeline to produce a meaningfully larger and cleaner dataset (higher source diversity, lower leakage, and stronger augmentation quality).
 
 *   **Option A: Shared Volume (Recommended)**
     1.  Rent a cheap "Standard" instance (e.g., 1x RTX 3060 or a CPU-only instance) with a large network volume (e.g., 100GB).
     2.  Run stages 0 through 6 to produce the final dataset.
     3.  Stop the instance but **keep the volume**.
-    4.  Deploy a "Secure Cloud" H100 instance and **attach the same volume**.
+    4.  Deploy a "Secure Cloud" L40S instance and **attach the same volume**.
     5.  Run stage 9 (Full-Scale Training).
 
 *   **Option B: Local Preparation & Upload**
@@ -206,7 +207,7 @@ To minimize expensive H100 time, you should prepare the dataset on a cheaper ins
         *   `scripts/runpod_setup.sh`
 
 ### 2. Setup on RunPod
-Once logged into your H100 instance:
+Once logged into your L40S instance:
 
 ```bash
 # Clone the repository (if not already copied)
@@ -220,21 +221,21 @@ bash scripts/runpod_setup.sh
 source venv/bin/activate
 ```
 
-### 3. Running the 20-Hour Training
-The `pipeline.yaml` is configured with `full_scale` targets for `Qwen2.5-Coder-7B`. To execute the 20-hour session:
+### 3. Running Full-Scale Training on L40S
+The `pipeline.yaml` is configured with L40S-friendly `full_scale` settings for `Qwen2.5-Coder-7B`:
 
 ```bash
 python3 -m pipeline run 9
 ```
 
-**Optimization for 20 Hours:**
-To ensure the session lasts approximately 20 hours on a single H100, the following adjustments were made:
-- **Data Volume:** Increased `limit` to `1000` projects to target ~100k+ samples.
-- **Context Length:** Set `max_seq_len: 32768` for long-context fine-tuning on H100.
-- **Batch Size:** Total effective batch size of 64 (`per_device_train_batch_size: 4` * `gradient_accumulation_steps: 16`).
-- **Duration:** With ~100k samples and 3 epochs, the training is estimated to run for ~18-22 hours depending on the final filtered dataset size.
+**Current full_scale profile (single L40S):**
+- **Context Length:** `max_seq_len: 3072`
+- **Batching:** `per_device_train_batch_size: 1`, `gradient_accumulation_steps: 32` (effective batch size 32)
+- **Precision:** `bf16: true`, 4-bit base model with `bnb_4bit_compute_dtype: bfloat16`
+- **Epochs:** `num_train_epochs: 3`
 
-If you need to extend the duration further, increase `num_train_epochs` or `gradient_accumulation_steps` in `pipeline.yaml`.
+If you hit memory limits, reduce `max_seq_len` to `2048` before lowering batch settings.
+If you need a longer run with current data volume, increase `num_train_epochs` modestly.
 
 ### 4. Monitoring
 Use TensorBoard to monitor the training progress:
