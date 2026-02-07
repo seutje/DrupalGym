@@ -31,11 +31,29 @@ sources:
     direction: "desc"
 
 dataset:
+  training_version: "v2"
   targets:
     train: 0.8
     valid: 0.1
     test: 0.1
   max_seq_len: 1024
+
+dataset_refinement:
+  input_version: "v1"
+  output_version: "v2"
+  seed: 42
+  max_output_lines: 300
+  chunk_overlap_lines: 30
+  target_test_ratio: 0.3
+  augmentation:
+    enabled: true
+    ratio: 0.6
+    input_excerpt_lines: 120
+    types:
+      - "bugfix"
+      - "refactor"
+      - "write_from_spec"
+      - "explain_and_implement"
 
 training:
   test_run:
@@ -64,7 +82,7 @@ training:
         base_model: "Qwen/Qwen2.5-Coder-3B"
         training_type: "QLoRA"
   full_scale:
-    max_seq_len: 8192
+    max_seq_len: 32768
     num_train_epochs: 3
     per_device_train_batch_size: 4
     per_device_eval_batch_size: 4

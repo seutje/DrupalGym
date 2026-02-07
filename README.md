@@ -43,7 +43,7 @@ python3 -m pipeline run 0
 python3 -m pipeline pipeline
 ```
 
-The default sequence is: `sources`, `acquisition`, `normalization`, `sft`, `quality`, `dataset`, `train`, `eval`.
+The default sequence is: `sources`, `acquisition`, `normalization`, `sft`, `quality`, `dataset`, `dataset_refine`, `train`, `eval`.
 
 ## Stage Map
 Stage names and aliases accepted by the CLI:
@@ -57,6 +57,7 @@ Stage names and aliases accepted by the CLI:
 | 4 | `phase4`, `sft` |
 | 5 | `phase5`, `quality` |
 | 6 | `phase6`, `dataset` |
+| 6b | `phase6b`, `dataset_refine`, `refine` |
 | 7 | `phase7`, `train` |
 | 8 | `phase8`, `eval` |
 | 9 | `phase9`, `full_train` |
@@ -127,12 +128,21 @@ Prereqs: `quality/passed.jsonl`.
 What it does: shuffles with a fixed seed and splits into train/valid/test.
 Outputs: `dataset/v1/train.jsonl`, `dataset/v1/valid.jsonl`, `dataset/v1/test.jsonl`, `dataset/index.json`.
 
+**Stage 6b: Dataset Refinement for Training**
+Command:
+```bash
+python3 -m pipeline run 6b
+```
+Prereqs: `dataset/v1/`.
+What it does: filters malformed retrieval prompts and class/interface/trait mismatches, chunks long outputs, rebalances test-vs-production samples, and adds non-retrieval instruction variants (`bugfix`, `refactor`, `write_from_spec`, `explain_and_implement`).
+Outputs: `dataset/v2/train.jsonl`, `dataset/v2/valid.jsonl`, `dataset/v2/test.jsonl`, `dataset/v2/rejected.jsonl`, `dataset/v2/manifest.json`.
+
 **Stage 7: Training (Consumer GPU Test Run)**
 Command:
 ```bash
 python3 -m pipeline run 7
 ```
-Prereqs: CUDA-capable GPU, `dataset/v1/`.
+Prereqs: CUDA-capable GPU, dataset configured by `dataset.training_version` (default `dataset/v2/`).
 What it does: runs a QLoRA test from `training.test_run` in `pipeline.yaml` (defaults: `Qwen2.5-Coder-3B`, `max_seq_len=2048`, `max_steps=100`, ~10GB VRAM).
 Outputs: adapters under `models/<model>/test_run/adapter/` and logs in `manifests/`.
 
@@ -220,7 +230,7 @@ python3 -m pipeline run 9
 **Optimization for 20 Hours:**
 To ensure the session lasts approximately 20 hours on a single H100, the following adjustments were made:
 - **Data Volume:** Increased `limit` to `1000` projects to target ~100k+ samples.
-- **Context Length:** Set `max_seq_len: 8192` to maximize H100 utilization.
+- **Context Length:** Set `max_seq_len: 32768` for long-context fine-tuning on H100.
 - **Batch Size:** Total effective batch size of 64 (`per_device_train_batch_size: 4` * `gradient_accumulation_steps: 16`).
 - **Duration:** With ~100k samples and 3 epochs, the training is estimated to run for ~18-22 hours depending on the final filtered dataset size.
 

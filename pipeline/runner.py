@@ -8,7 +8,17 @@ def run_pipeline(stages=None):
     root = get_project_root()
     
     if not stages:
-        stages = ["sources", "acquisition", "normalization", "sft", "quality", "dataset", "train", "eval"]
+        stages = [
+            "sources",
+            "acquisition",
+            "normalization",
+            "sft",
+            "quality",
+            "dataset",
+            "dataset_refine",
+            "train",
+            "eval",
+        ]
     
     for stage in stages:
         print(f"\n>>> Running stage: {stage}")

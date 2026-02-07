@@ -178,8 +178,11 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
     gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
     logger.info(f"Detected GPU: {gpu_name} ({gpu_mem_gb:.1f} GB VRAM)")
 
-    dataset_version = "v1"
+    dataset_version = config.get("dataset", {}).get("training_version", "v1")
     dataset_dir = root / "dataset" / dataset_version
+    if not dataset_dir.exists():
+        logger.error(f"Dataset version {dataset_version} not found at {dataset_dir}")
+        return 1
     models_dir = root / "models"
     
     default_cfg = {

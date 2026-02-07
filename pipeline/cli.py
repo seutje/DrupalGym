@@ -7,6 +7,7 @@ from .normalization import run_normalization_stage
 from .sft_generation import run_sft_generation_stage
 from .quality_gates import run_quality_stage
 from .dataset_packaging import run_packaging_stage
+from .dataset_refinement import run_dataset_refinement_stage
 from .train import run_training_stage
 from .evaluation import run_evaluation_stage
 from .utils import load_config, get_project_root
@@ -30,6 +31,8 @@ def run_stage(stage_name: str, config: dict):
         return run_quality_stage(config, logger, root)
     elif stage_name in {"6", "phase6", "dataset"}:
         return run_packaging_stage(config, logger, root)
+    elif stage_name in {"6b", "phase6b", "dataset_refine", "refine"}:
+        return run_dataset_refinement_stage(config, logger, root)
     elif stage_name in {"7", "phase7", "train"}:
         return run_training_stage(config, logger, root, mode="test_run")
     elif stage_name in {"8", "phase8", "eval"}:
