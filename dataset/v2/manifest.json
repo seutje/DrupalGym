@@ -1,73 +1,104 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-07T13:15:59Z",
+  "timestamp": "2026-02-07T18:46:56Z",
   "inputs": [
     {
       "name": "v1_train",
       "version": "v1",
-      "hash": "ce56da5be54cca0a4bded9e5ee0158a147abdcc417d658daefca4d876c1f4e0f"
+      "hash": "210dfcaddaa583b8567fcdbe2a3dad3ae55fa0846123cbc384f7da9656cfc7c9"
     },
     {
       "name": "v1_valid",
       "version": "v1",
-      "hash": "5fbccfaa763337ae0f4ae202c3ab55190ebba48120652ba788d992770ad99a3d"
+      "hash": "d3b75d555c048ff7cd087bb325b11618468ca701180830c755642426b7b40448"
     },
     {
       "name": "v1_test",
       "version": "v1",
-      "hash": "8c746817a86c8df63b4a817092f75029ece9d63ec05d6bfe537096a533c1c151"
+      "hash": "c54c73fa13c764c9504837eb434013b9d61ec24d65067233378e62cbe48f51a5"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "4eaf7f3964ccfca0a86d441a10e5b6abeff5d2db81ca8e83c533fd84090318ee"
+      "hash": "2c09aa83120e43fa9150c464918eb28c2b52193393aba7be1a2a255cfb8cc8a2"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "bc4b127ad2fe3572479025941f3105d0df731e64da449735f6149df5da6ea941"
+      "hash": "68e884cbd90823cd9936a218561f12a695f03c0f1be113a3784f612815b92bb2"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "c1e2b89fd8939d5f65e2fa7bfe9bd75ec4f3bad602ad6016036f5908f657b4e7"
+      "hash": "3e214279a0802cdff6a151de2f93ed035c3551fead483bd9e2d721c0dfcf41d6"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "5b28a851c677936acbbf510a6d41a0fada1fbb55eec9e6c12a947a275eef27d9"
+      "hash": "cf33c20a3b66288df1a8694a388fb42de53d8805e36013a8c3aa2f62d1c5aea9"
+    },
+    "eval_candidate_pool": {
+      "path": "dataset/v2/eval_candidate_pool.jsonl",
+      "hash": "6c7d7221cd90abe04de6598366d296df44428024106a1aacf66f066f3364af94"
     }
   },
   "metrics": {
-    "input_total": 12166,
-    "filtered_total": 11047,
-    "chunked_source_records": 1330,
-    "chunked_total_records": 12973,
-    "rebalanced_total_records": 8917,
-    "dropped_test_records": 4056,
-    "augmented_records": 2491,
-    "augmentation_candidate_pool": 4152,
-    "final_total": 11408,
-    "test_ratio_before_rebalance": 0.5188,
-    "test_ratio_after_rebalance": 0.3,
-    "split_train": 9125,
-    "split_valid": 1141,
-    "split_test": 1142,
+    "input_total": 18223,
+    "filtered_total": 16309,
+    "chunked_source_records": 1504,
+    "chunked_total_records": 18213,
+    "rebalanced_total_records": 10239,
+    "dropped_test_records": 0,
+    "augmented_records": 3590,
+    "augmentation_candidate_pool": 4787,
+    "final_total": 13829,
+    "test_ratio_before_rebalance": 0.4378,
+    "test_ratio_after_rebalance": 0.0,
+    "split_train": 11062,
+    "split_valid": 1382,
+    "split_test": 1385,
+    "eval_candidate_pool_size": 7974,
+    "exclude_test_sources_from_training_pool": true,
+    "yield_breakdown": {
+      "input_records": 18223,
+      "after_validation_filter": 16309,
+      "after_chunking": 18213,
+      "after_test_pool_extraction": 10239,
+      "after_augmentation": 13829,
+      "rejected_records": 1914
+    },
+    "feedback_targets": {
+      "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
+      "weak_categories": [
+        "sdc",
+        "di"
+      ],
+      "details": [
+        {
+          "category": "sdc",
+          "negative_prompt_count": 1,
+          "avg_delta": -0.3334
+        },
+        {
+          "category": "di",
+          "negative_prompt_count": 1,
+          "avg_delta": -0.25
+        }
+      ]
+    },
     "rejection_reasons": {
-      "malformed_instruction_class_slot": 1069,
-      "class_interface_mismatch": 46,
-      "class_enum_mismatch": 2,
-      "class_trait_mismatch": 2,
-      "test_rebalance_drop": 4056,
-      "augmentation_non_php_source": 824,
-      "augmentation_chunked_source": 525,
-      "augmentation_non_php_output": 741,
-      "augmentation_from_test_source": 2675
+      "malformed_instruction_class_slot": 1909,
+      "class_interface_mismatch": 3,
+      "class_trait_mismatch": 1,
+      "class_enum_mismatch": 1,
+      "augmentation_non_php_source": 4209,
+      "augmentation_chunked_source": 556,
+      "augmentation_non_php_output": 687
     },
     "sample_type_distribution": {
-      "retrieval": 8917,
-      "bugfix": 623,
-      "refactor": 623,
-      "write_from_spec": 623,
-      "explain_and_implement": 622
+      "retrieval": 10239,
+      "bugfix": 898,
+      "refactor": 898,
+      "write_from_spec": 897,
+      "explain_and_implement": 897
     }
   },
   "config": {
@@ -76,10 +107,11 @@
     "seed": 42,
     "max_output_lines": 300,
     "chunk_overlap_lines": 30,
-    "target_test_ratio": 0.3,
+    "target_test_ratio": 0.15,
+    "exclude_test_sources_from_training_pool": true,
     "augmentation": {
       "enabled": true,
-      "ratio": 0.6,
+      "ratio": 0.75,
       "input_excerpt_lines": 120,
       "types": [
         "bugfix",
