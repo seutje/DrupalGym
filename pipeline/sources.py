@@ -1,4 +1,5 @@
 import json
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -176,6 +177,33 @@ def _extract_default_branch(node: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _extract_changed_epoch(node: Dict[str, Any]) -> Optional[int]:
+    for key in ("changed", "field_last_modified", "created"):
+        value = node.get(key)
+        if isinstance(value, dict):
+            value = value.get("value")
+        if value is None:
+            continue
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _extract_project_usage(node: Dict[str, Any]) -> int:
+    usage = node.get("project_usage", {})
+    if not isinstance(usage, dict):
+        return 0
+    total = 0
+    for value in usage.values():
+        try:
+            total += int(value)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def _iter_drupal_project_nodes(
     session: requests.Session,
     endpoint: str,
@@ -194,15 +222,15 @@ def _iter_drupal_project_nodes(
             "sort": sort,
             "direction": direction,
         }
-        # Only pass valid filters to node.json API
         if filters:
-            for k, v in filters.items():
-                if k in {"field_project_machine_name", "nid"}:
-                    params[k] = v
+            for key, value in filters.items():
+                if key in {"field_project_machine_name", "nid"}:
+                    params[key] = value
         if page > 0:
             params["page"] = page
         if limit:
             params["limit"] = limit
+
         payload = _request_json(
             session,
             endpoint,
@@ -245,7 +273,37 @@ def _discover_drupal_projects(
     )
 
 
-def _fetch_composer_constraint(
+def _parse_version_pairs(constraint: str) -> list[tuple[int, int]]:
+    matches = re.findall(r"(\d+)\.(\d+)", constraint or "")
+    return [(int(major), int(minor)) for major, minor in matches]
+
+
+def _min_version_pair(constraint: str) -> Optional[tuple[int, int]]:
+    pairs = _parse_version_pairs(constraint)
+    if not pairs:
+        return None
+    return min(pairs)
+
+
+def _supports_php_min(constraint: str, minimum: str) -> bool:
+    if not constraint:
+        return False
+    required = _min_version_pair(minimum)
+    found = _min_version_pair(constraint)
+    if not required or not found:
+        return False
+    return found >= required
+
+
+def _looks_archived_or_security_only(project: Dict[str, Any]) -> bool:
+    title = str(project.get("title", "")).lower()
+    machine_name = str(_extract_machine_name(project) or "").lower()
+    text = " ".join([title, machine_name])
+    archived_markers = ["archived", "deprecated", "security only", "end of life", "eol"]
+    return any(marker in text for marker in archived_markers)
+
+
+def _fetch_composer_metadata(
     session: requests.Session,
     logger,
     machine_name: str,
@@ -253,20 +311,29 @@ def _fetch_composer_constraint(
     policy: RateLimitPolicy,
 ) -> Optional[Dict[str, Any]]:
     for branch in branches:
-        # Use cleaner raw URL pattern (works across more GitLab versions/proxies)
-        url = (
-            f"https://git.drupalcode.org/project/{machine_name}/raw/"
-            f"{branch}/composer.json"
-        )
+        url = f"https://git.drupalcode.org/project/{machine_name}/raw/{branch}/composer.json"
         text = _request_text(session, url, logger, policy=policy, allow_404=True)
-        if text:
-            try:
-                data = json.loads(text)
-            except json.JSONDecodeError:
-                logger.error("Invalid composer.json content.", url=url)
-                return None
-            requirement = data.get("require", {}).get("drupal/core")
-            return {"constraint": requirement, "branch": branch, "url": url}
+        if not text:
+            continue
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            logger.error("Invalid composer.json content.", url=url)
+            return None
+
+        require = data.get("require", {}) if isinstance(data.get("require"), dict) else {}
+        require_dev = data.get("require-dev", {}) if isinstance(data.get("require-dev"), dict) else {}
+        core_constraint = require.get("drupal/core") or require.get("drupal/core-recommended")
+        php_constraint = require.get("php")
+        has_tests = any("phpunit" in key.lower() for key in require_dev.keys())
+
+        return {
+            "constraint": core_constraint,
+            "php_constraint": php_constraint,
+            "branch": branch,
+            "url": url,
+            "has_tests": has_tests,
+        }
     return None
 
 
@@ -311,6 +378,26 @@ def _build_curated_sources(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     ]
 
 
+def _score_project(
+    *,
+    is_drupal11: bool,
+    has_php_83: bool,
+    recent_bonus: int,
+    has_tests: bool,
+    usage: int,
+    machine_name: str,
+) -> tuple[int, int, int, int, int, str]:
+    # Ranking key: Drupal 11 > PHP 8.3 > recent changed > has tests, then usage and id tie-breakers.
+    return (
+        1 if is_drupal11 else 0,
+        1 if has_php_83 else 0,
+        recent_bonus,
+        1 if has_tests else 0,
+        usage,
+        machine_name,
+    )
+
+
 def _write_sources_manifest(
     path: Path,
     seed: Optional[int],
@@ -334,16 +421,23 @@ def _write_sources_manifest(
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as handle:
+    with open(path, "w", encoding="utf-8") as handle:
         json.dump(manifest, handle, indent=2)
 
 
 def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
     sources_dir = root / config.get("directories", {}).get("sources", "sources")
-    seed = config.get("seed")
+    seed = int(config.get("seed", 42))
+    rng = random.Random(seed)
+
     policy = RateLimitPolicy()
     session = requests.Session()
-    drupal_project_config = config.get("sources", {}).get("drupal_projects", {})
+
+    source_cfg = config.get("sources", {})
+    drupal_project_config = source_cfg.get("drupal_projects", {})
+    discovery_cfg = source_cfg.get("discovery", {})
+    filter_cfg = source_cfg.get("filters", {})
+
     user_agent = drupal_project_config.get("user_agent") or "DrupalGym/1.0"
     headers = {
         "User-Agent": user_agent,
@@ -359,18 +453,22 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
     if isinstance(extra_headers, dict):
         headers.update(extra_headers)
     session.headers.update(headers)
+
     curated_sources = _build_curated_sources(config)
 
     drupal_endpoint = drupal_project_config.get("endpoint")
     discovered_projects: List[Dict[str, Any]] = []
     filtered_projects: List[Dict[str, Any]] = []
+    rejection_reasons: dict[str, int] = {}
+
     if drupal_endpoint:
         logger.info("Discovering Drupal.org projects.", endpoint=drupal_endpoint)
-        max_pages = int(drupal_project_config.get("max_pages", 5))
-        limit = drupal_project_config.get("page_size") or drupal_project_config.get("limit") or 100
+        max_pages = int(discovery_cfg.get("max_pages", drupal_project_config.get("max_pages", 5)))
+        limit = int(discovery_cfg.get("limit_per_page", drupal_project_config.get("limit", 100)))
         filters = drupal_project_config.get("filters", {})
         sort = drupal_project_config.get("sort", "changed")
         direction = drupal_project_config.get("direction", "desc")
+
         discovered_projects = _discover_drupal_projects(
             session,
             drupal_endpoint,
@@ -382,65 +480,119 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
             sort=sort,
             direction=direction,
         )
-        
-        # Helper to calculate total usage for sorting
-        def get_total_usage(node):
-            usage = node.get("project_usage", {})
-            if not isinstance(usage, dict):
-                return 0
-            return sum(int(v) for v in usage.values() if str(v).isdigit())
+        logger.info("Discovered Drupal.org projects.", count=len(discovered_projects))
 
-        # Sort discovered projects by usage locally to find the most popular ones
-        discovered_projects.sort(key=get_total_usage, reverse=True)
-        
-        logger.info(
-            "Discovered and sorted Drupal.org projects.",
-            count=len(discovered_projects),
-        )
+    min_recent_days = int(discovery_cfg.get("min_last_changed_days", 365))
+    max_after_filter = int(discovery_cfg.get("max_projects_after_filter", 200))
+    require_core_constraint = str(filter_cfg.get("require_drupal_core_constraint", "^11"))
+    require_php_min = str(filter_cfg.get("require_php_constraint_min", "8.3"))
+    exclude_archived = bool(filter_cfg.get("exclude_archived_or_security_only", True))
+
+    candidates: list[dict[str, Any]] = []
 
     for project in discovered_projects:
-        if len(filtered_projects) >= 100:
-            break
         machine_name = _extract_machine_name(project)
         if not machine_name:
+            rejection_reasons["missing_machine_name"] = rejection_reasons.get("missing_machine_name", 0) + 1
             continue
+
+        if exclude_archived and _looks_archived_or_security_only(project):
+            rejection_reasons["archived_or_security_only"] = rejection_reasons.get("archived_or_security_only", 0) + 1
+            continue
+
         default_branch = _extract_default_branch(project)
-        candidate_branches = []
-        if default_branch:
-            candidate_branches.append(default_branch)
-        
-        # Focused list of common branch patterns for modern Drupal
-        # Prefer semantic versioning patterns first for speed
-        common_patterns = ["11.x", "11.0.x", "1.x", "1.0.x", "2.x", "3.x", "8.x-1.x", "main", "master"]
-        for p in common_patterns:
-            if p not in candidate_branches:
-                candidate_branches.append(p)
-                
-        composer_info = _fetch_composer_constraint(
-            session, logger, machine_name, candidate_branches, policy
-        )
+        candidate_branches = [default_branch] if default_branch else []
+        for branch in ["11.x", "11.0.x", "1.x", "1.0.x", "2.x", "3.x", "main", "master"]:
+            if branch and branch not in candidate_branches:
+                candidate_branches.append(branch)
+
+        composer_info = _fetch_composer_metadata(session, logger, machine_name, candidate_branches, policy)
         if not composer_info:
+            rejection_reasons["missing_composer"] = rejection_reasons.get("missing_composer", 0) + 1
             continue
-        constraint = composer_info.get("constraint")
-        if not _is_drupal_core_11(str(constraint)):
+
+        core_constraint = str(composer_info.get("constraint") or "")
+        php_constraint = str(composer_info.get("php_constraint") or "")
+
+        is_drupal11 = _is_drupal_core_11(core_constraint)
+        if require_core_constraint and not is_drupal11:
+            rejection_reasons["core_not_drupal11"] = rejection_reasons.get("core_not_drupal11", 0) + 1
             continue
-        filtered_projects.append(
+
+        has_php_83 = _supports_php_min(php_constraint, require_php_min)
+        if require_php_min and not has_php_83:
+            rejection_reasons["php_constraint_too_low"] = rejection_reasons.get("php_constraint_too_low", 0) + 1
+            continue
+
+        changed_epoch = _extract_changed_epoch(project)
+        last_changed = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(changed_epoch)) if changed_epoch else None
+        last_changed_days = None
+        recent_bonus = 0
+        if changed_epoch:
+            last_changed_days = int((time.time() - changed_epoch) // 86400)
+            if last_changed_days <= max(1, min_recent_days):
+                recent_bonus = 1
+
+        usage = _extract_project_usage(project)
+        has_tests = bool(composer_info.get("has_tests", False))
+
+        selection_reason = (
+            f"drupal_core={core_constraint or 'missing'}; "
+            f"php={php_constraint or 'missing'}; "
+            f"recent={recent_bonus == 1}; has_tests={has_tests}"
+        )
+
+        score_tuple = _score_project(
+            is_drupal11=is_drupal11,
+            has_php_83=has_php_83,
+            recent_bonus=recent_bonus,
+            has_tests=has_tests,
+            usage=usage,
+            machine_name=machine_name,
+        )
+
+        candidates.append(
             {
                 "id": machine_name,
                 "type": "git",
                 "url": f"https://git.drupalcode.org/project/{machine_name}.git",
                 "ref": composer_info.get("branch"),
                 "composer_url": composer_info.get("url"),
-                "core_constraint": constraint,
+                "composer_constraints": {
+                    "drupal_core": core_constraint,
+                    "php": php_constraint,
+                },
+                "core_constraint": core_constraint,
+                "php_constraint": php_constraint,
+                "last_changed": last_changed,
+                "last_changed_days": last_changed_days,
+                "has_tests": has_tests,
+                "usage": usage,
+                "selection_reason": selection_reason,
+                "_score": score_tuple,
             }
         )
 
+    # Deterministic ranking with seed-based tiebreak.
+    rng.shuffle(candidates)
+    candidates.sort(key=lambda item: item["_score"], reverse=True)
+
+    for entry in candidates[:max_after_filter]:
+        clean_entry = dict(entry)
+        clean_entry.pop("_score", None)
+        filtered_projects.append(clean_entry)
+
     metrics = {
         "projects_discovered": len(discovered_projects),
+        "projects_candidates": len(candidates),
         "projects_filtered": len(filtered_projects),
         "curated_sources": len(curated_sources),
+        "rejection_reasons": rejection_reasons,
+        "max_projects_after_filter": max_after_filter,
     }
+
     logger.metric("projects_discovered", len(discovered_projects))
+    logger.metric("projects_candidates", len(candidates))
     logger.metric("projects_filtered", len(filtered_projects))
     logger.metric("curated_sources", len(curated_sources))
 

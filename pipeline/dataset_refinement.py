@@ -9,7 +9,7 @@ from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
 
 RETRIEVAL_PROMPT_RE = re.compile(
-    r"^Show me the implementation of the class (?P<symbol>.+?) in the file (?P<path>.+)\.$"
+    r"^Show me the implementation of the (?P<kind>class|interface|trait|enum) (?P<symbol>[A-Za-z_][A-Za-z0-9_]*) in the file (?P<path>.+)\.$"
 )
 VALID_SYMBOL_RE = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 DECLARATION_RE = re.compile(r"\b(class|interface|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
@@ -53,7 +53,7 @@ def _is_php_output(sample: dict[str, Any]) -> bool:
 
 def _is_source_php_file(sample: dict[str, Any]) -> bool:
     source = _sample_source(sample).lower()
-    return source.endswith(".php")
+    return source.endswith((".php", ".module", ".inc", ".install", ".theme"))
 
 
 def _is_unchunked_sample(sample: dict[str, Any]) -> bool:
@@ -104,9 +104,15 @@ def _validate_sample(sample: dict[str, Any]) -> tuple[bool, str]:
     prompt_match = RETRIEVAL_PROMPT_RE.match(instruction)
 
     if prompt_match:
-        class_slot = prompt_match.group("symbol").strip()
-        if not VALID_SYMBOL_RE.match(class_slot):
+        symbol_slot = prompt_match.group("symbol").strip()
+        prompt_kind = prompt_match.group("kind").strip()
+        if not VALID_SYMBOL_RE.match(symbol_slot):
             return False, "malformed_instruction_class_slot"
+        detected_kind, _detected_name = _detect_symbol_kind_and_name(sample)
+        if prompt_kind != detected_kind:
+            return False, f"{prompt_kind}_{detected_kind}_mismatch"
+    elif instruction.startswith("Show me the implementation of"):
+        return False, "invalid_symbol_kind_prompt"
 
     instruction_lower = instruction.lower()
     if "implementation of the class" in instruction_lower:
@@ -354,6 +360,74 @@ def _split_dataset(
     return assigned
 
 
+def _derive_feedback_targets(eval_metrics_path: Path) -> dict[str, Any]:
+    if not eval_metrics_path.exists():
+        return {
+            "source": None,
+            "weak_categories": [],
+            "details": [],
+        }
+
+    try:
+        with open(eval_metrics_path, "r", encoding="utf-8") as handle:
+            metrics = json.load(handle)
+    except Exception:
+        return {
+            "source": str(eval_metrics_path),
+            "weak_categories": [],
+            "details": [],
+        }
+
+    summary = metrics.get("summary", {})
+    weak_details: dict[str, dict[str, Any]] = {}
+    for model in summary.get("models", []):
+        for delta in model.get("prompt_deltas", []):
+            category = str(delta.get("category", "general"))
+            delta_score = float(delta.get("delta", 0.0))
+            if delta_score >= 0:
+                continue
+            item = weak_details.setdefault(category, {"count": 0, "avg_delta": 0.0})
+            item["count"] += 1
+            item["avg_delta"] += delta_score
+
+    details = []
+    for category, item in weak_details.items():
+        avg_delta = item["avg_delta"] / max(1, item["count"])
+        details.append(
+            {
+                "category": category,
+                "negative_prompt_count": item["count"],
+                "avg_delta": round(avg_delta, 4),
+            }
+        )
+    details.sort(key=lambda item: item["avg_delta"])
+    weak_categories = [item["category"] for item in details]
+    return {
+        "source": str(eval_metrics_path),
+        "weak_categories": weak_categories,
+        "details": details,
+    }
+
+
+def _score_candidate_for_feedback(sample: dict[str, Any], weak_categories: list[str]) -> int:
+    if not weak_categories:
+        return 0
+    source = str(sample.get("metadata", {}).get("source", "")).lower()
+    text = f"{source} {sample.get('instruction', '')}".lower()
+    category_keywords = {
+        "attributes": ["attribute", "plugin", "block", "#["],
+        "di": ["service", "dependency", "container", "inject"],
+        "routing": ["routing", "route", "controller", "path"],
+        "sdc": ["component", "twig", "sdc"],
+    }
+    score = 0
+    for category in weak_categories:
+        keywords = category_keywords.get(category, [category])
+        if any(keyword in text for keyword in keywords):
+            score += 1
+    return score
+
+
 def _write_jsonl(path: Path, samples: list[dict[str, Any]]) -> None:
     with open(path, "w", encoding="utf-8") as handle:
         for sample in samples:
@@ -369,10 +443,11 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
         "seed": seed,
         "max_output_lines": 300,
         "chunk_overlap_lines": 30,
-        "target_test_ratio": 0.3,
+        "target_test_ratio": 0.15,
+        "exclude_test_sources_from_training_pool": True,
         "augmentation": {
             "enabled": True,
-            "ratio": 0.6,
+            "ratio": 0.75,
             "input_excerpt_lines": 120,
             "types": [
                 "bugfix",
@@ -413,6 +488,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             calculate_hash(split_path),
         )
     manifest.data["config"] = refine_cfg
+    feedback_targets = _derive_feedback_targets(root / "eval" / "metrics.json")
 
     records = []
     for split_name, split_path in required_files.items():
@@ -441,35 +517,52 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             chunked_source_count += 1
         chunked_records.extend(chunks)
 
-    rebalanced_records, dropped_tests, test_ratio_before, test_ratio_after = _rebalance_test_ratio(
-        chunked_records,
-        seed=int(refine_cfg["seed"]) + 17,
-        target_test_ratio=float(refine_cfg["target_test_ratio"]),
-    )
-    for dropped in dropped_tests:
-        rejected = copy.deepcopy(dropped)
-        rejected["rejection_reason"] = "test_rebalance_drop"
-        rejected_records.append(rejected)
-    if dropped_tests:
-        rejection_reasons["test_rebalance_drop"] = rejection_reasons.get("test_rebalance_drop", 0) + len(
-            dropped_tests
+    exclude_test_sources = bool(refine_cfg.get("exclude_test_sources_from_training_pool", False))
+    eval_candidate_pool: list[dict[str, Any]] = []
+    if exclude_test_sources:
+        eval_candidate_pool = [sample for sample in chunked_records if _is_test_sample(sample)]
+        rebalanced_records = [sample for sample in chunked_records if not _is_test_sample(sample)]
+        dropped_tests: list[dict[str, Any]] = []
+        test_ratio_before = len(eval_candidate_pool) / len(chunked_records) if chunked_records else 0.0
+        test_ratio_after = 0.0
+    else:
+        rebalanced_records, dropped_tests, test_ratio_before, test_ratio_after = _rebalance_test_ratio(
+            chunked_records,
+            seed=int(refine_cfg["seed"]) + 17,
+            target_test_ratio=float(refine_cfg["target_test_ratio"]),
         )
+        for dropped in dropped_tests:
+            rejected = copy.deepcopy(dropped)
+            rejected["rejection_reason"] = "test_rebalance_drop"
+            rejected_records.append(rejected)
+        if dropped_tests:
+            rejection_reasons["test_rebalance_drop"] = rejection_reasons.get("test_rebalance_drop", 0) + len(
+                dropped_tests
+            )
 
     augmentation_cfg = refine_cfg["augmentation"]
     augmented_records: list[dict[str, Any]] = []
+    candidate_records: list[dict[str, Any]] = []
     if augmentation_cfg.get("enabled", True):
-        candidate_records: list[dict[str, Any]] = []
         for sample in rebalanced_records:
             can_augment, reason = _is_augmentation_candidate(sample)
             if can_augment:
                 candidate_records.append(sample)
             else:
                 rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
-        ratio = max(0.0, min(1.0, float(augmentation_cfg.get("ratio", 0.6))))
+        ratio = max(0.0, min(1.0, float(augmentation_cfg.get("ratio", 0.75))))
         candidate_count = int(len(candidate_records) * ratio)
         rng = random.Random(int(refine_cfg["seed"]) + 53)
         candidate_indices = list(range(len(candidate_records)))
         rng.shuffle(candidate_indices)
+        weak_categories = feedback_targets.get("weak_categories", [])
+        candidate_indices.sort(
+            key=lambda idx: (
+                _score_candidate_for_feedback(candidate_records[idx], weak_categories),
+                -idx,
+            ),
+            reverse=True,
+        )
         selected_indices = sorted(candidate_indices[:candidate_count])
         aug_types = augmentation_cfg.get(
             "types",
@@ -512,11 +605,28 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         calculate_hash(rejected_path),
     )
 
+    eval_candidate_path = output_dir / "eval_candidate_pool.jsonl"
+    _write_jsonl(eval_candidate_path, eval_candidate_pool)
+    manifest.add_output(
+        "eval_candidate_pool",
+        f"dataset/{refine_cfg['output_version']}/eval_candidate_pool.jsonl",
+        calculate_hash(eval_candidate_path),
+    )
+
     sample_type_distribution: dict[str, int] = {"retrieval": 0}
     for sample in augmented_records:
         aug_type = sample.get("metadata", {}).get("refinement", {}).get("augmentation_type", "unknown")
         sample_type_distribution[aug_type] = sample_type_distribution.get(aug_type, 0) + 1
     sample_type_distribution["retrieval"] = len(rebalanced_records)
+
+    yield_breakdown = {
+        "input_records": len(records),
+        "after_validation_filter": len(filtered_records),
+        "after_chunking": len(chunked_records),
+        "after_test_pool_extraction": len(rebalanced_records),
+        "after_augmentation": len(final_records),
+        "rejected_records": len(rejected_records),
+    }
 
     metrics = {
         "input_total": len(records),
@@ -533,6 +643,10 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "split_train": len(splits["train"]),
         "split_valid": len(splits["valid"]),
         "split_test": len(splits["test"]),
+        "eval_candidate_pool_size": len(eval_candidate_pool),
+        "exclude_test_sources_from_training_pool": exclude_test_sources,
+        "yield_breakdown": yield_breakdown,
+        "feedback_targets": feedback_targets,
         "rejection_reasons": rejection_reasons,
         "sample_type_distribution": sample_type_distribution,
     }

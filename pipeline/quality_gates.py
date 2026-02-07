@@ -1,101 +1,156 @@
 import json
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
-from .manifest import Manifest, calculate_hash
+
 from .logger import PipelineLogger
+from .manifest import Manifest, calculate_hash
+
+
+SYMBOL_PROMPT_RE = re.compile(
+    r"^Show me the implementation of the (class|interface|trait|enum) ([A-Za-z_][A-Za-z0-9_]*) in the file (.+)\.$"
+)
+
 
 class QualityGate:
-    def __init__(self, logger: PipelineLogger):
+    def __init__(self, logger: PipelineLogger, config: dict | None = None):
         self.logger = logger
+        cfg = config or {}
+        self.min_output_chars = int(cfg.get("min_output_chars", 150))
+        self.max_output_chars = int(cfg.get("max_output_chars", 50000))
+        self.run_php_lint = bool(cfg.get("run_php_lint", False))
+        self.php_bin = shutil.which("php") if self.run_php_lint else None
+
         self.rejected_count = 0
         self.passed_count = 0
-        self.reasons = {}
+        self.reasons: dict[str, int] = {}
+        self.seen_output_hashes: set[str] = set()
+
+    def _php_lint_ok(self, output: str) -> bool:
+        if not self.run_php_lint or not self.php_bin:
+            return True
+        if "<?php" not in output:
+            return True
+
+        content = output if output.lstrip().startswith("<?php") else f"<?php\n{output}"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".php", delete=False, encoding="utf-8") as handle:
+            handle.write(content)
+            temp_path = handle.name
+
+        try:
+            proc = subprocess.run(
+                [self.php_bin, "-l", temp_path],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode == 0
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
 
     def check_sample(self, sample: dict) -> tuple[bool, str]:
         output = sample.get("output", "")
-        instruction = sample.get("instruction", "").lower()
-        
-        # 1. Basic length checks
-        if len(output) < 150: # Increased minimum length
+        instruction = sample.get("instruction", "")
+        instruction_lower = instruction.lower()
+
+        if len(output) < self.min_output_chars:
             return False, "too_short"
-        if len(output) > 50000:
+        if len(output) > self.max_output_chars:
             return False, "too_long"
-            
-        # 2. Boilerplate Detection
+
+        output_hash = __import__("hashlib").sha256(output.encode("utf-8", errors="ignore")).hexdigest()
+        if output_hash in self.seen_output_hashes:
+            return False, "near_duplicate_content"
+        self.seen_output_hashes.add(output_hash)
+
         boilerplate_terms = ["cookie", "yes, please", "no, do not track me", "sign in", "log in", "create an account"]
         for term in boilerplate_terms:
-            if term in output.lower()[:200]: # Check beginning of file
+            if term in output.lower()[:200]:
                 return False, "boilerplate_content"
 
-        # 3. Instruction quality
-        if "explain the following topic" in instruction:
-             topic = instruction.split(":")[-1].strip()
-             if len(topic) < 6:
-                 return False, "poor_instruction"
-             
-             generic_titles = [
-                "contents of this file", "introduction", "readme", "license", 
-                "requirements", "installation", "configuration", "for developers",
-                "description", "features", "support", "author", "maintainers",
-                "copyright", "how it works", "prerequisites", "cors configuration",
-                "tracking script verification", "using the condition", "cookie behavior",
-                "gnu general public license"
-             ]
-             if topic in generic_titles:
-                 return False, "generic_topic"
+        if instruction.startswith("Show me the implementation of"):
+            match = SYMBOL_PROMPT_RE.match(instruction)
+            if not match:
+                return False, "invalid_symbol_kind_prompt"
 
-             if any(term in topic for term in ["cookie", "web beacon", "sign in"]):
-                 return False, "irrelevant_topic"
+        if "explain the following topic" in instruction_lower:
+            topic = instruction.split(":")[-1].strip().lower()
+            if len(topic) < 6:
+                return False, "poor_instruction"
+            generic_titles = {
+                "contents of this file",
+                "introduction",
+                "readme",
+                "license",
+                "requirements",
+                "installation",
+                "configuration",
+                "for developers",
+                "description",
+                "features",
+                "support",
+                "author",
+                "maintainers",
+                "copyright",
+                "how it works",
+                "prerequisites",
+                "gnu general public license",
+            }
+            if topic in generic_titles:
+                return False, "generic_topic"
+            if any(term in topic for term in ["cookie", "web beacon", "sign in"]):
+                return False, "irrelevant_topic"
 
-        # 4. Content diversity check (avoid single-word or path-only outputs)
-        lines = [l for l in output.split('\n') if l.strip()]
+        lines = [line for line in output.split("\n") if line.strip()]
         if len(lines) < 3 and len(output) < 500:
-             return False, "insufficient_detail"
+            return False, "insufficient_detail"
 
-        # 5. Drupal 11 / Modernity check
-        # If it's a doc summary, it should ideally mention modern Drupal or at least not be exclusively D7
         if sample.get("metadata", {}).get("type") == "doc_summary":
             content_lower = output.lower()
-            if "drupal 7" in content_lower and not any(v in content_lower for v in ["drupal 8", "drupal 9", "drupal 10", "drupal 11", "symfony"]):
+            if "drupal 7" in content_lower and not any(
+                marker in content_lower for marker in ["drupal 8", "drupal 9", "drupal 10", "drupal 11", "symfony"]
+            ):
                 return False, "drupal_7_only"
 
-        # 5. PHP Quality
-        if "<?php" in output and "namespace" not in output:
-            if "hook_" not in output:
-                return False, "missing_namespace_in_php"
+        if "<?php" in output and "namespace" not in output and "hook_" not in output:
+            return False, "missing_namespace_in_php"
+
+        if not self._php_lint_ok(output):
+            return False, "php_syntax_error"
 
         return True, ""
 
     def process(self, input_path: Path, output_path: Path, rejected_path: Path):
-        with open(input_path, 'r', encoding='utf-8') as f_in, \
-             open(output_path, 'w', encoding='utf-8') as f_out, \
-             open(rejected_path, 'w', encoding='utf-8') as f_rej:
-            
+        with open(input_path, "r", encoding="utf-8") as f_in, open(output_path, "w", encoding="utf-8") as f_out, open(
+            rejected_path, "w", encoding="utf-8"
+        ) as f_rej:
             for line in f_in:
                 try:
                     sample = json.loads(line)
                     is_passed, reason = self.check_sample(sample)
-                    
                     if is_passed:
-                        f_out.write(json.dumps(sample) + '\n')
+                        f_out.write(json.dumps(sample, ensure_ascii=True) + "\n")
                         self.passed_count += 1
                     else:
                         sample["rejection_reason"] = reason
-                        f_rej.write(json.dumps(sample) + '\n')
+                        f_rej.write(json.dumps(sample, ensure_ascii=True) + "\n")
                         self.rejected_count += 1
                         self.reasons[reason] = self.reasons.get(reason, 0) + 1
-                except Exception as e:
-                    self.logger.error(f"Error in quality gate: {str(e)}")
+                except Exception as exc:
+                    self.logger.error(f"Error in quality gate: {str(exc)}")
+
 
 def run_quality_stage(config: dict, logger: PipelineLogger, root: Path):
     sft_dir = root / "sft"
     quality_dir = root / "quality"
     quality_dir.mkdir(parents=True, exist_ok=True)
-    
+
     input_file = sft_dir / "combined.jsonl"
     output_file = quality_dir / "passed.jsonl"
     rejected_file = quality_dir / "rejected.jsonl"
-    
+
     if not input_file.exists():
         logger.error("sft/combined.jsonl not found.")
         return 1
@@ -103,22 +158,26 @@ def run_quality_stage(config: dict, logger: PipelineLogger, root: Path):
     manifest = Manifest("quality_gates", quality_dir)
     manifest.add_input("sft_combined", "1.0", calculate_hash(input_file))
 
-    gate = QualityGate(logger)
+    gate_cfg = config.get("quality", {})
+    gate = QualityGate(logger, config=gate_cfg)
     gate.process(input_file, output_file, rejected_file)
-    
+
     report = {
         "passed": gate.passed_count,
         "rejected": gate.rejected_count,
         "rejection_reasons": gate.reasons,
-        "pass_rate": gate.passed_count / (gate.passed_count + gate.rejected_count) if (gate.passed_count + gate.rejected_count) > 0 else 0
+        "pass_rate": gate.passed_count / (gate.passed_count + gate.rejected_count)
+        if (gate.passed_count + gate.rejected_count) > 0
+        else 0,
     }
-    
-    with open(quality_dir / "report.json", "w") as f:
-        json.dump(report, f, indent=2)
-        
+
+    with open(quality_dir / "report.json", "w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2)
+
     manifest.set_metrics(report)
     manifest.add_output("passed_sft", "quality/passed.jsonl", calculate_hash(output_file))
+    manifest.add_output("rejected_sft", "quality/rejected.jsonl", calculate_hash(rejected_file))
     manifest.save()
-    
+
     logger.info(f"Quality gate complete. Report: {report}")
     return 0

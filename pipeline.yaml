@@ -29,6 +29,44 @@ sources:
     limit: 1000
     sort: "changed"
     direction: "desc"
+  discovery:
+    max_pages: 20
+    limit_per_page: 50
+    min_last_changed_days: 365
+    max_projects_after_filter: 200
+  filters:
+    require_drupal_core_constraint: "^11"
+    require_php_constraint_min: "8.3"
+    exclude_archived_or_security_only: true
+
+acquisition:
+  docs:
+    max_pages_per_source: 300
+    allowed_prefixes:
+      drupal_docs:
+        - "https://www.drupal.org/docs/develop"
+      drupal_api:
+        - "https://api.drupal.org/api/drupal"
+      symfony_docs:
+        - "https://symfony.com/doc/7.0/"
+      drupal_security:
+        - "https://www.drupal.org/security"
+
+normalization:
+  dedup:
+    exact_hash: true
+    near_dup_enabled: true
+    near_dup_method: "simhash_5gram"
+    near_dup_threshold: 0.92
+
+sft_generation:
+  enable_symbol_kind_prompts: true
+  include_extensions: [".php", ".module", ".inc", ".install", ".theme", ".yml", ".twig", ".md"]
+
+quality:
+  run_php_lint: true
+  min_output_chars: 220
+  max_output_chars: 30000
 
 dataset:
   training_version: "v2"
@@ -44,10 +82,11 @@ dataset_refinement:
   seed: 42
   max_output_lines: 300
   chunk_overlap_lines: 30
-  target_test_ratio: 0.3
+  target_test_ratio: 0.15
+  exclude_test_sources_from_training_pool: true
   augmentation:
     enabled: true
-    ratio: 0.6
+    ratio: 0.75
     input_excerpt_lines: 120
     types:
       - "bugfix"

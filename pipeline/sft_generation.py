@@ -1,166 +1,225 @@
 import json
 import os
-import random
+import re
 from pathlib import Path
-from .manifest import Manifest, calculate_hash
+
 from .logger import PipelineLogger
+from .manifest import Manifest, calculate_hash
+
+
+DECLARATION_RE = re.compile(r"\b(class|interface|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
+
 
 class InstructionGenerator:
-    def __init__(self, logger: PipelineLogger):
+    def __init__(self, logger: PipelineLogger, config: dict | None = None):
         self.logger = logger
-        self.samples = []
+        self.config = config or {}
+        self.enable_symbol_kind_prompts = bool(self.config.get("enable_symbol_kind_prompts", True))
+        self.samples: list[dict] = []
+        self._seen_pairs: set[tuple[str, str]] = set()
+
+    def _append(self, sample: dict) -> None:
+        key = (sample["instruction"], sample["output"])
+        if key in self._seen_pairs:
+            return
+        self._seen_pairs.add(key)
+        self.samples.append(sample)
+
+    def _sanitize_symbol_name(self, candidate: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9_]", "", candidate)
+        if not cleaned:
+            return "UnknownSymbol"
+        if not cleaned[0].isalpha():
+            cleaned = f"Symbol{cleaned}"
+        return cleaned
+
+    def _symbol_from_path(self, rel_path: str) -> str:
+        stem = Path(rel_path).stem
+        return self._sanitize_symbol_name(stem)
 
     def generate_from_php(self, content: str, rel_path: str):
-        """Simple template-based generation from PHP code."""
-        # This is a placeholder for more sophisticated logic
-        # e.g., parsing class names, hook names, etc.
-        
-        # Example: if it's a plugin
-        if 'namespace Drupal\\' in content and 'class ' in content:
-            class_match = re.search(r'class\s+(\w+)', content)
-            if class_match:
-                class_name = class_match.group(1)
-                self.samples.append({
-                    "instruction": f"Show me the implementation of the class {class_name} in the file {rel_path}.",
-                    "input": "",
-                    "output": content,
-                    "metadata": {
-                        "source": rel_path,
-                        "type": "code_reference"
-                    }
-                })
+        declaration = DECLARATION_RE.search(content)
+        if declaration:
+            symbol_kind = declaration.group(1)
+            symbol_name = declaration.group(2)
+        else:
+            symbol_kind = "class"
+            symbol_name = self._symbol_from_path(rel_path)
+
+        if self.enable_symbol_kind_prompts:
+            instruction = (
+                f"Show me the implementation of the {symbol_kind} {symbol_name} in the file {rel_path}."
+            )
+        else:
+            instruction = f"Show me the implementation of the class {symbol_name} in the file {rel_path}."
+
+        self._append(
+            {
+                "instruction": instruction,
+                "input": "",
+                "output": content,
+                "metadata": {
+                    "source": rel_path,
+                    "type": "code_reference",
+                    "symbol_kind": symbol_kind,
+                    "symbol_name": symbol_name,
+                },
+            }
+        )
+
+    def generate_from_yaml(self, content: str, rel_path: str):
+        stem = Path(rel_path).stem.replace("_", " ")
+        instruction = f"Provide the Drupal 11 YAML configuration from {rel_path} and explain what it defines."
+        self._append(
+            {
+                "instruction": instruction,
+                "input": "",
+                "output": content,
+                "metadata": {
+                    "source": rel_path,
+                    "type": "yaml_reference",
+                    "topic": stem,
+                },
+            }
+        )
+
+    def generate_from_twig(self, content: str, rel_path: str):
+        instruction = f"Show the Twig template implementation in {rel_path} for Drupal 11 theming."
+        self._append(
+            {
+                "instruction": instruction,
+                "input": "",
+                "output": content,
+                "metadata": {
+                    "source": rel_path,
+                    "type": "twig_reference",
+                },
+            }
+        )
 
     def generate_from_doc(self, content: str, rel_path: str):
-        """Generate instructions from documentation."""
-        generic_titles = [
-            "contents of this file", "introduction", "readme", "license", 
-            "requirements", "installation", "configuration", "for developers",
-            "description", "features", "support", "author", "maintainers",
-            "copyright", "how it works", "prerequisites", "cors configuration",
-            "tracking script verification", "using the condition", "cookie behavior",
-            "bulk update user redirect preferences", "troubleshooting",
-            "browser-side reset", "server-side reset", "patches details",
-            "local libraries", "gnu general public license"
-        ]
+        generic_titles = {
+            "contents of this file",
+            "introduction",
+            "readme",
+            "license",
+            "requirements",
+            "installation",
+            "configuration",
+            "for developers",
+            "description",
+            "features",
+            "support",
+            "author",
+            "maintainers",
+            "copyright",
+            "how it works",
+            "prerequisites",
+            "gnu general public license",
+            "changelog",
+            "release notes",
+        }
 
-        # Skip files that are likely not useful for training Drupal 11 logic
         skip_patterns = [
-            "LICENSE", "CHANGELOG", "COPYRIGHT", ".cspell", "MAINTAINERS",
-            "SECURITY.txt", "DRUPAL_ORG", "fixtures", "node_modules", "vendor"
+            "license",
+            "changelog",
+            "copyright",
+            "maintainers",
+            "fixtures",
+            "node_modules",
+            "vendor/",
         ]
-        if any(p.lower() in rel_path.lower() for p in skip_patterns):
+        rel_lower = rel_path.lower()
+        if any(pattern in rel_lower for pattern in skip_patterns):
             return
 
-        # Try to find an H1 title
         title = ""
-        title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
         if title_match:
             title = title_match.group(1).strip()
-        
-        # If title is generic or missing, try to get it from the path
-        if not title or title.lower() in generic_titles:
-            # Try to get the module name or something meaningful from path
-            path_parts = rel_path.split('/')
-            if 'repos' in path_parts:
-                idx = path_parts.index('repos')
-                if len(path_parts) > idx + 1:
-                    module_name = path_parts[idx + 1].replace('_', ' ').title()
-                    
-                    # Special handling for Drupal Core sub-components
-                    if module_name == "Drupal Core" and len(path_parts) > idx + 4:
-                        # e.g., repos/drupal_core/core/modules/block -> Block
-                        sub_component = path_parts[idx + 4].replace('_', ' ').title()
-                        module_name = f"{module_name}: {sub_component}"
-
-                    # If it's a README, combine module name with the title if title is not generic
-                    if "README" in rel_path:
-                        if title and title.lower() not in generic_titles:
-                            title = f"{module_name}: {title}"
-                        else:
-                            title = module_name
-                    else:
-                        file_stem = Path(rel_path).stem.replace('-', ' ').replace('_', ' ').title()
-                        if title and title.lower() not in generic_titles:
-                            title = f"{module_name} ({file_stem}): {title}"
-                        else:
-                            title = f"{module_name}: {file_stem}"
 
         if not title:
-            # Fallback to first line or filename
-            lines = [l for l in content.split('\n') if l.strip() and not l.startswith('!')]
-            title = lines[0].strip('# ') if lines else Path(rel_path).stem.replace('-', ' ').replace('_', ' ')
-        
-        # Clean up title from common noise
-        title = re.sub(r'\{#.*?\}', '', title).strip()
-        
-        # Final quality filters for instruction
-        if len(title) < 5 or "cookie" in title.lower() or title.lower() in generic_titles:
+            lines = [line.strip() for line in content.split("\n") if line.strip()]
+            title = lines[0].strip("# ") if lines else Path(rel_path).stem
+
+        title = re.sub(r"\{#.*?\}", "", title).strip()
+        title_lower = title.lower()
+
+        if len(title) < 5 or title_lower in generic_titles:
             return
-            
-        # Version filter: if title mentions old version but not 11, skip
-        if re.search(r'\b(7|8|9|10)\.x\b', title) and '11' not in title:
+        if any(token in title_lower for token in ["cookie", "sign in", "tracking", "web beacon"]):
+            return
+        if "drupal 7" in content.lower() and "drupal 11" not in content.lower() and "drupal 10" not in content.lower():
             return
 
         instruction = f"Explain the following topic based on Drupal 11 documentation: {title}"
-        
-        # Simple deduplication within the same stage run
-        if any(s['instruction'] == instruction and s['output'] == content for s in self.samples):
-            return
-
-        self.samples.append({
-            "instruction": instruction,
-            "input": "",
-            "output": content,
-            "metadata": {
-                "source": rel_path,
-                "type": "doc_summary"
+        self._append(
+            {
+                "instruction": instruction,
+                "input": "",
+                "output": content,
+                "metadata": {
+                    "source": rel_path,
+                    "type": "doc_summary",
+                    "topic": title,
+                },
             }
-        })
+        )
 
     def save(self, output_path: Path):
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as handle:
             for sample in self.samples:
-                f.write(json.dumps(sample) + '\n')
+                handle.write(json.dumps(sample, ensure_ascii=True) + "\n")
 
-import re
 
 def run_sft_generation_stage(config: dict, logger: PipelineLogger, root: Path):
     clean_dir = root / "clean"
     sft_dir = root / "sft"
     sft_dir.mkdir(parents=True, exist_ok=True)
-    
+
     manifest = Manifest("sft_generation", sft_dir)
-    
-    generator = InstructionGenerator(logger)
-    
-    # Process cleaned files
+
+    sft_cfg = config.get("sft_generation", {})
+    include_extensions = sft_cfg.get(
+        "include_extensions",
+        [".php", ".module", ".inc", ".install", ".theme", ".yml", ".twig", ".md"],
+    )
+    include_extensions = {suffix.lower() for suffix in include_extensions}
+
+    generator = InstructionGenerator(logger, config=sft_cfg)
+
     for dirpath, _, filenames in os.walk(clean_dir):
         for filename in filenames:
             if filename == "dedup_manifest.json":
                 continue
-                
+
             clean_path = Path(dirpath) / filename
+            if clean_path.suffix.lower() not in include_extensions:
+                continue
+
             rel_path = str(clean_path.relative_to(clean_dir))
-            
             try:
-                with open(clean_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                if clean_path.suffix.lower() in ['.php', '.module', '.inc']:
+                with open(clean_path, "r", encoding="utf-8") as handle:
+                    content = handle.read()
+
+                suffix = clean_path.suffix.lower()
+                if suffix in {".php", ".module", ".inc", ".install", ".theme"}:
                     generator.generate_from_php(content, rel_path)
-                elif clean_path.suffix.lower() in ['.html', '.md', '.txt']:
+                elif suffix == ".yml":
+                    generator.generate_from_yaml(content, rel_path)
+                elif suffix == ".twig":
+                    generator.generate_from_twig(content, rel_path)
+                elif suffix in {".md", ".txt", ".html"}:
                     generator.generate_from_doc(content, rel_path)
-            except Exception as e:
-                logger.error(f"Error generating SFT samples for {clean_path}: {str(e)}")
+            except Exception as exc:
+                logger.error(f"Error generating SFT samples for {clean_path}: {str(exc)}")
 
     output_file = sft_dir / "combined.jsonl"
     generator.save(output_file)
-    
-    manifest.set_metrics({
-        "total_samples": len(generator.samples)
-    })
+
+    manifest.set_metrics({"total_samples": len(generator.samples)})
     manifest.add_output("combined_sft", "sft/combined.jsonl", calculate_hash(output_file))
     manifest.save()
-    
+
     logger.info(f"SFT generation complete. Generated {len(generator.samples)} samples.")
     return 0

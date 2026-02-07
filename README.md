@@ -135,8 +135,8 @@ python3 -m pipeline run 6b
 ```
 Prereqs: `dataset/v1/`.
 What it does: filters malformed retrieval prompts and class/interface/trait mismatches, chunks long outputs, rebalances test-vs-production samples, and adds non-retrieval instruction variants (`bugfix`, `refactor`, `write_from_spec`, `explain_and_implement`).
-Refinement details: uses source-aware split assignment to prevent cross-split source leakage, and only augments non-test, unchunked PHP samples with PHP outputs.
-Outputs: `dataset/v2/train.jsonl`, `dataset/v2/valid.jsonl`, `dataset/v2/test.jsonl`, `dataset/v2/rejected.jsonl`, `dataset/v2/manifest.json`.
+Refinement details: uses source-aware split assignment to prevent cross-split source leakage, can exclude `/tests/` sources from the training pool, writes those into an eval candidate pool, and only augments non-test, unchunked PHP samples with PHP outputs.
+Outputs: `dataset/v2/train.jsonl`, `dataset/v2/valid.jsonl`, `dataset/v2/test.jsonl`, `dataset/v2/rejected.jsonl`, `dataset/v2/eval_candidate_pool.jsonl`, `dataset/v2/manifest.json`.
 
 **Stage 7: Training (Consumer GPU Test Run)**
 Command:

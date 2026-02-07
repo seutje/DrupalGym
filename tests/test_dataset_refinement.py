@@ -10,7 +10,7 @@ from pipeline.dataset_refinement import (
 
 
 class DatasetRefinementHelpersTest(unittest.TestCase):
-    def test_validate_rejects_malformed_class_slot(self):
+    def test_validate_rejects_invalid_symbol_kind_prompt(self):
         sample = {
             "instruction": "Show me the implementation of the class is in the file repos/drupal_core/core/lib/Drupal/Foo.php.",
             "input": "",
@@ -33,6 +33,19 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         passed, reason = _validate_sample(sample)
         self.assertFalse(passed)
         self.assertEqual(reason, "class_interface_mismatch")
+
+    def test_validate_accepts_interface_prompt(self):
+        sample = {
+            "instruction": "Show me the implementation of the interface StreamWrapperManagerInterface in the file repos/drupal_core/core/lib/Drupal/Core/StreamWrapper/StreamWrapperManagerInterface.php.",
+            "input": "",
+            "output": "<?php\n\nnamespace Drupal\\Core\\StreamWrapper;\n\ninterface StreamWrapperManagerInterface {}\n",
+            "metadata": {
+                "source": "repos/drupal_core/core/lib/Drupal/Core/StreamWrapper/StreamWrapperManagerInterface.php"
+            },
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertTrue(passed)
+        self.assertEqual(reason, "")
 
     def test_chunk_sample_splits_long_output(self):
         output = "\n".join([f"line_{idx}" for idx in range(1, 610)])
