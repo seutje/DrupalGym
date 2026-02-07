@@ -1,6 +1,6 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-07T12:04:28Z",
+  "timestamp": "2026-02-07T13:15:59Z",
   "inputs": [
     {
       "name": "v1_train",
@@ -21,15 +21,15 @@
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "836669a7c64055b6a3a2fd82089180ec0fc0ca034f11a9c696bc06ebe14c7119"
+      "hash": "4eaf7f3964ccfca0a86d441a10e5b6abeff5d2db81ca8e83c533fd84090318ee"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "6edafa05fcde116b7685d73fca319089f18abdbf16a528d9e0c772f055b41b9f"
+      "hash": "bc4b127ad2fe3572479025941f3105d0df731e64da449735f6149df5da6ea941"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "decbd9d79bdbe63923c21c03ae9ec11a103b8efac46ff179e3ba1ae47290ca22"
+      "hash": "c1e2b89fd8939d5f65e2fa7bfe9bd75ec4f3bad602ad6016036f5908f657b4e7"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
@@ -43,26 +43,31 @@
     "chunked_total_records": 12973,
     "rebalanced_total_records": 8917,
     "dropped_test_records": 4056,
-    "augmented_records": 3745,
-    "final_total": 12662,
+    "augmented_records": 2491,
+    "augmentation_candidate_pool": 4152,
+    "final_total": 11408,
     "test_ratio_before_rebalance": 0.5188,
     "test_ratio_after_rebalance": 0.3,
-    "split_train": 10129,
-    "split_valid": 1266,
-    "split_test": 1267,
+    "split_train": 9125,
+    "split_valid": 1141,
+    "split_test": 1142,
     "rejection_reasons": {
       "malformed_instruction_class_slot": 1069,
       "class_interface_mismatch": 46,
       "class_enum_mismatch": 2,
       "class_trait_mismatch": 2,
-      "test_rebalance_drop": 4056
+      "test_rebalance_drop": 4056,
+      "augmentation_non_php_source": 824,
+      "augmentation_chunked_source": 525,
+      "augmentation_non_php_output": 741,
+      "augmentation_from_test_source": 2675
     },
     "sample_type_distribution": {
       "retrieval": 8917,
-      "bugfix": 937,
-      "refactor": 936,
-      "write_from_spec": 936,
-      "explain_and_implement": 936
+      "bugfix": 623,
+      "refactor": 623,
+      "write_from_spec": 623,
+      "explain_and_implement": 622
     }
   },
   "config": {

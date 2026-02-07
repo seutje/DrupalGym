@@ -37,6 +37,44 @@ def _is_test_sample(sample: dict[str, Any]) -> bool:
     return "/tests/" in source or source.endswith("test.php")
 
 
+def _sample_source(sample: dict[str, Any]) -> str:
+    source = str(sample.get("metadata", {}).get("source", "")).strip()
+    if source:
+        return source
+    split_name = str(sample.get("_source_split", "unknown"))
+    split_line = str(sample.get("_source_line", "0"))
+    return f"__unknown_source__:{split_name}:{split_line}"
+
+
+def _is_php_output(sample: dict[str, Any]) -> bool:
+    output = str(sample.get("output", ""))
+    return output.lstrip().startswith("<?php")
+
+
+def _is_source_php_file(sample: dict[str, Any]) -> bool:
+    source = _sample_source(sample).lower()
+    return source.endswith(".php")
+
+
+def _is_unchunked_sample(sample: dict[str, Any]) -> bool:
+    refinement = sample.get("metadata", {}).get("refinement", {})
+    if not isinstance(refinement, dict):
+        return True
+    return int(refinement.get("chunk_total", 1)) <= 1
+
+
+def _is_augmentation_candidate(sample: dict[str, Any]) -> tuple[bool, str]:
+    if _is_test_sample(sample):
+        return False, "augmentation_from_test_source"
+    if not _is_source_php_file(sample):
+        return False, "augmentation_non_php_source"
+    if not _is_php_output(sample):
+        return False, "augmentation_non_php_output"
+    if not _is_unchunked_sample(sample):
+        return False, "augmentation_chunked_source"
+    return True, ""
+
+
 def _detect_symbol_kind_and_name(sample: dict[str, Any]) -> tuple[str, str]:
     output = sample.get("output", "")
     declaration = DECLARATION_RE.search(output)
@@ -274,21 +312,46 @@ def _rebalance_test_ratio(
 def _split_dataset(
     samples: list[dict[str, Any]], targets: dict[str, float], seed: int
 ) -> dict[str, list[dict[str, Any]]]:
-    shuffled = list(samples)
-    rng = random.Random(seed)
-    rng.shuffle(shuffled)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for sample in samples:
+        source = _sample_source(sample)
+        grouped.setdefault(source, []).append(sample)
 
-    total = len(shuffled)
+    source_keys = list(grouped.keys())
+    rng = random.Random(seed)
+    rng.shuffle(source_keys)
+
+    total = len(samples)
     train_target = float(targets.get("train", 0.8))
     valid_target = float(targets.get("valid", 0.1))
-
-    train_end = int(total * train_target)
-    valid_end = train_end + int(total * valid_target)
-    return {
-        "train": shuffled[:train_end],
-        "valid": shuffled[train_end:valid_end],
-        "test": shuffled[valid_end:],
+    target_counts = {
+        "train": int(total * train_target),
+        "valid": int(total * valid_target),
     }
+    target_counts["test"] = total - target_counts["train"] - target_counts["valid"]
+
+    counts = {"train": 0, "valid": 0, "test": 0}
+    assigned: dict[str, list[dict[str, Any]]] = {"train": [], "valid": [], "test": []}
+
+    def score_assignment(split_name: str, group_size: int) -> tuple[int, int, int]:
+        local_counts = dict(counts)
+        local_counts[split_name] += group_size
+        l1_error = sum(abs(local_counts[name] - target_counts[name]) for name in ("train", "valid", "test"))
+        deficit = target_counts[split_name] - counts[split_name]
+        return l1_error, -deficit, local_counts[split_name]
+
+    for source in source_keys:
+        group = grouped[source]
+        group_size = len(group)
+        choices = ("train", "valid", "test")
+        best_split = min(choices, key=lambda name: score_assignment(name, group_size))
+        assigned[best_split].extend(group)
+        counts[best_split] += group_size
+
+    for split_name in ("train", "valid", "test"):
+        rng.shuffle(assigned[split_name])
+
+    return assigned
 
 
 def _write_jsonl(path: Path, samples: list[dict[str, Any]]) -> None:
@@ -395,7 +458,13 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
     augmentation_cfg = refine_cfg["augmentation"]
     augmented_records: list[dict[str, Any]] = []
     if augmentation_cfg.get("enabled", True):
-        candidate_records = [sample for sample in rebalanced_records if not _is_test_sample(sample)]
+        candidate_records: list[dict[str, Any]] = []
+        for sample in rebalanced_records:
+            can_augment, reason = _is_augmentation_candidate(sample)
+            if can_augment:
+                candidate_records.append(sample)
+            else:
+                rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
         ratio = max(0.0, min(1.0, float(augmentation_cfg.get("ratio", 0.6))))
         candidate_count = int(len(candidate_records) * ratio)
         rng = random.Random(int(refine_cfg["seed"]) + 53)
@@ -457,6 +526,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "rebalanced_total_records": len(rebalanced_records),
         "dropped_test_records": len(dropped_tests),
         "augmented_records": len(augmented_records),
+        "augmentation_candidate_pool": len(candidate_records) if augmentation_cfg.get("enabled", True) else 0,
         "final_total": len(final_records),
         "test_ratio_before_rebalance": round(test_ratio_before, 4),
         "test_ratio_after_rebalance": round(test_ratio_after, 4),

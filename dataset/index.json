@@ -10,13 +10,13 @@
     "path": "dataset/v1"
   },
   "v2": {
-    "timestamp": "2026-02-07T12:04:28Z",
+    "timestamp": "2026-02-07T13:15:59Z",
     "stage": "dataset_refinement",
     "metrics": {
-      "train": 10129,
-      "valid": 1266,
-      "test": 1267,
-      "total": 12662
+      "train": 9125,
+      "valid": 1141,
+      "test": 1142,
+      "total": 11408
     },
     "path": "dataset/v2"
   }
