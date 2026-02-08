@@ -3,7 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pipeline.train import _audit_dataset_artifacts, _build_completion_labels
+from pipeline.train import (
+    _audit_dataset_artifacts,
+    _build_completion_data_collator,
+    _build_completion_labels,
+)
 
 
 class _DummyLogger:
@@ -46,6 +50,56 @@ class TrainHelpersTest(unittest.TestCase):
                 max_repeated_line_ratio=0.15,
             )
             self.assertFalse(ok)
+
+    def test_completion_data_collator_pads_mixed_lengths(self):
+        collator = _build_completion_data_collator(
+            pad_token_id=42,
+            padding_strategy="dynamic",
+            pad_to_multiple_of=None,
+        )
+        features = [
+            {
+                "input_ids": [1] * 2048,
+                "attention_mask": [1] * 2048,
+                "labels": [7] * 2048,
+            },
+            {
+                "input_ids": [2] * 2047,
+                "attention_mask": [1] * 2047,
+                "labels": [8] * 2047,
+            },
+        ]
+
+        batch = collator(features)
+        self.assertEqual(tuple(batch["input_ids"].shape), (2, 2048))
+        self.assertEqual(tuple(batch["attention_mask"].shape), (2, 2048))
+        self.assertEqual(tuple(batch["labels"].shape), (2, 2048))
+        self.assertEqual(batch["input_ids"][1, -1].item(), 42)
+        self.assertEqual(batch["attention_mask"][1, -1].item(), 0)
+        self.assertEqual(batch["labels"][1, -1].item(), -100)
+
+    def test_completion_data_collator_pad_to_multiple_of(self):
+        collator = _build_completion_data_collator(
+            pad_token_id=0,
+            padding_strategy="dynamic",
+            pad_to_multiple_of=8,
+        )
+        features = [
+            {
+                "input_ids": [1] * 15,
+                "attention_mask": [1] * 15,
+                "labels": [2] * 15,
+            },
+            {
+                "input_ids": [3] * 13,
+                "attention_mask": [1] * 13,
+                "labels": [4] * 13,
+            },
+        ]
+
+        batch = collator(features)
+        self.assertEqual(tuple(batch["input_ids"].shape), (2, 16))
+        self.assertEqual(batch["labels"][0, -1].item(), -100)
 
 
 if __name__ == "__main__":

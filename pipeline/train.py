@@ -2,6 +2,7 @@ import os
 import json
 import re
 import torch
+from typing import Any
 
 def patch_torch_matmul():
     if getattr(torch, "matmul_orig", None):
@@ -82,6 +83,53 @@ def _build_completion_labels(token_ids: list[int], marker_tokens: list[int]) -> 
             labels[idx] = -100
         return labels
     return [-100] * len(labels)
+
+
+def _round_up_to_multiple(value: int, multiple: int) -> int:
+    if multiple <= 1:
+        return value
+    return ((value + multiple - 1) // multiple) * multiple
+
+
+def _build_completion_data_collator(
+    *,
+    pad_token_id: int,
+    padding_strategy: str = "dynamic",
+    pad_to_multiple_of: int | None = None,
+    fixed_max_length: int | None = None,
+):
+    def collate(features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+        if not features:
+            return {}
+
+        sequence_lengths = [len(feature["input_ids"]) for feature in features]
+        if padding_strategy == "fixed_max_length" and fixed_max_length:
+            target_length = int(fixed_max_length)
+        else:
+            target_length = max(sequence_lengths)
+        if pad_to_multiple_of and pad_to_multiple_of > 1:
+            target_length = _round_up_to_multiple(target_length, int(pad_to_multiple_of))
+
+        pad_values = {
+            "input_ids": int(pad_token_id),
+            "attention_mask": 0,
+            "labels": -100,
+            "token_type_ids": 0,
+        }
+        batch: dict[str, list[list[int]]] = {
+            key: [] for key in pad_values if key in features[0]
+        }
+
+        for feature in features:
+            feature_length = len(feature["input_ids"])
+            pad_size = target_length - feature_length
+            for key in batch:
+                values = list(feature[key])
+                batch[key].append(values + [pad_values[key]] * pad_size)
+
+        return {key: torch.tensor(values, dtype=torch.long) for key, values in batch.items()}
+
+    return collate
 
 
 def _has_predominantly_numeric_fenced_block(output: str) -> bool:
@@ -180,7 +228,6 @@ def train_model(
         BitsAndBytesConfig,
         TrainingArguments,
         Trainer,
-        default_data_collator,
     )
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
@@ -209,6 +256,35 @@ def train_model(
         return tokenized
 
     tokenized_datasets = dataset.map(tokenize_function, batched=True, remove_columns=dataset["train"].column_names)
+    train_sequence_lengths = [len(token_ids) for token_ids in tokenized_datasets["train"]["input_ids"]]
+    if not train_sequence_lengths:
+        raise ValueError("No training samples found after tokenization.")
+    logger.info(
+        "Tokenized train sequence length summary.",
+        min_seq_len=min(train_sequence_lengths),
+        max_seq_len=max(train_sequence_lengths),
+        requested_max_seq_len=int(train_cfg["max_seq_len"]),
+    )
+
+    padding_strategy = str(train_cfg.get("padding_strategy", "dynamic"))
+    if padding_strategy not in {"dynamic", "fixed_max_length"}:
+        logger.info(
+            "Unsupported padding strategy configured; falling back to dynamic padding.",
+            configured_padding_strategy=padding_strategy,
+        )
+        padding_strategy = "dynamic"
+    pad_to_multiple_of = train_cfg.get("pad_to_multiple_of")
+    data_collator = _build_completion_data_collator(
+        pad_token_id=int(tokenizer.pad_token_id),
+        padding_strategy=padding_strategy,
+        pad_to_multiple_of=int(pad_to_multiple_of) if pad_to_multiple_of else None,
+        fixed_max_length=int(train_cfg["max_seq_len"]),
+    )
+    logger.info(
+        "Using completion-aware data collator.",
+        padding_strategy=padding_strategy,
+        pad_to_multiple_of=int(pad_to_multiple_of) if pad_to_multiple_of else None,
+    )
 
     # 3. Model Configuration (QLoRA)
     bnb_config = BitsAndBytesConfig(
@@ -271,7 +347,7 @@ def train_model(
         args=training_args,
         train_dataset=tokenized_datasets["train"],
         eval_dataset=tokenized_datasets["validation"],
-        data_collator=default_data_collator,
+        data_collator=data_collator,
     )
 
     # 5. Execute Training
@@ -323,6 +399,8 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
         "warmup_ratio": 0.03,
         "lr_scheduler_type": "cosine",
         "max_models": 1,
+        "padding_strategy": "dynamic",
+        "pad_to_multiple_of": 8,
     }
     train_cfg = default_cfg | config.get("training", {}).get(mode, {})
     quality_cfg = config.get("quality", {})
