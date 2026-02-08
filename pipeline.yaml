@@ -68,7 +68,7 @@ quality:
   min_output_chars: 220
   max_output_chars: 30000
   max_numeric_line_streak: 12
-  max_repeated_line_ratio: 0.15
+  max_repeated_line_ratio: 0.31
 
 dataset:
   training_version: "v2"
