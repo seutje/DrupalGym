@@ -18,6 +18,20 @@ USE_RE = re.compile(r"^use\s+([^;]+);", re.MULTILINE)
 METHOD_RE = re.compile(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
+FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
+MAX_NUMERIC_LINE_STREAK = 12
+
+
+def _has_predominantly_numeric_fenced_block(output: str) -> bool:
+    for match in FENCED_BLOCK_RE.finditer(output):
+        block = match.group(1)
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 6:
+            continue
+        numeric_lines = sum(1 for line in lines if NUMERIC_LINE_RE.match(line))
+        if numeric_lines / len(lines) >= 0.8:
+            return True
+    return False
 
 
 def _load_split_records(split_path: Path, split_name: str) -> list[dict[str, Any]]:
@@ -141,8 +155,10 @@ def _validate_sample(sample: dict[str, Any]) -> tuple[bool, str]:
                 max_numeric_streak = current_streak
         else:
             current_streak = 0
-    if max_numeric_streak >= 40:
+    if max_numeric_streak >= MAX_NUMERIC_LINE_STREAK:
         return False, "numeric_line_streak_artifact"
+    if _has_predominantly_numeric_fenced_block(output):
+        return False, "numeric_code_block_artifact"
 
     stripped = output.rstrip()
     if stripped.count("```") % 2 != 0:
@@ -469,6 +485,7 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
         "chunk_overlap_lines": 30,
         "target_test_ratio": 0.15,
         "exclude_test_sources_from_training_pool": True,
+        "exclude_sources_prefixes": [],
         "augmentation": {
             "enabled": True,
             "ratio": 0.75,
@@ -485,6 +502,15 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
     merged_augmentation = defaults["augmentation"] | merged.get("augmentation", {})
     merged["augmentation"] = merged_augmentation
     return merged
+
+
+def _source_matches_prefix(sample: dict[str, Any], prefixes: list[str]) -> bool:
+    source = str(sample.get("metadata", {}).get("source", "")).strip().lower()
+    for prefix in prefixes:
+        clean = prefix.strip().lower()
+        if clean and source.startswith(clean):
+            return True
+    return False
 
 
 def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Path) -> int:
@@ -540,6 +566,22 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         if len(chunks) > 1:
             chunked_source_count += 1
         chunked_records.extend(chunks)
+
+    excluded_source_prefixes = [str(item) for item in refine_cfg.get("exclude_sources_prefixes", []) if str(item).strip()]
+    if excluded_source_prefixes:
+        retained_records: list[dict[str, Any]] = []
+        excluded_count = 0
+        for sample in chunked_records:
+            if _source_matches_prefix(sample, excluded_source_prefixes):
+                rejected = copy.deepcopy(sample)
+                rejected["rejection_reason"] = "excluded_source_prefix"
+                rejected_records.append(rejected)
+                excluded_count += 1
+                continue
+            retained_records.append(sample)
+        chunked_records = retained_records
+        if excluded_count:
+            rejection_reasons["excluded_source_prefix"] = rejection_reasons.get("excluded_source_prefix", 0) + excluded_count
 
     exclude_test_sources = bool(refine_cfg.get("exclude_test_sources_from_training_pool", False))
     eval_candidate_pool: list[dict[str, Any]] = []
@@ -685,6 +727,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "split_test": len(splits["test"]),
         "eval_candidate_pool_size": len(eval_candidate_pool),
         "exclude_test_sources_from_training_pool": exclude_test_sources,
+        "exclude_sources_prefixes": excluded_source_prefixes,
         "yield_breakdown": yield_breakdown,
         "feedback_targets": feedback_targets,
         "rejection_reasons": rejection_reasons,

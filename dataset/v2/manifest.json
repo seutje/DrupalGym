@@ -1,85 +1,94 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-07T19:38:49Z",
+  "timestamp": "2026-02-08T00:17:30Z",
   "inputs": [
     {
       "name": "v1_train",
       "version": "v1",
-      "hash": "cac2df83ee8b5364876fcded48a68290c5c87d1199cded3067a1528e05dcbae3"
+      "hash": "6877c195a3d4b8dc65bd2cbc56750b2326301835d8d66f7b4b0dbe2fa36aae1f"
     },
     {
       "name": "v1_valid",
       "version": "v1",
-      "hash": "831651aaede83191e032210418347f4307da849340c9a7e584e637b2e146e813"
+      "hash": "0ff8c0c019f656dc3dcb4138579af48759a4a91cb27ed46836cc5d97734656ec"
     },
     {
       "name": "v1_test",
       "version": "v1",
-      "hash": "77eb9febd859d46935da43d32b0dced610a77671309357b49c672b9b8db501a0"
+      "hash": "f1ca0c73fcb7f1f5b6ffe265983e71789a0c7e82bb0499e828c4f2841140f1bb"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "2fd9dee0f34986e5d1da87853b25cbee2adbd602df5871a2604d2e7ee6bdccb8"
+      "hash": "eb1f693737c68f83081dc5818988a7a27daf4f77dee1f5be82279e2d20042989"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "f3197ace02434c873ecfd75eb81a40e2db1f0b4b50e288ead2ddd9e2720eccc3"
+      "hash": "ed22f4348c2127934f666775f0a4eb96bf7473c82350366c2154330cc5193b12"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "5827c5a1cd9d3ad3ca71505009306ec2445566d4cd2cca895b5c0416ecc018f5"
+      "hash": "f4a89dd84f6798c4496b55476f6a42fbb4c6e600dbdfd0aca0c9adc2950d6534"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "62ccc948ceab950b01add220d6bcb43570ed2fef1b0aaaf897247025b646e75d"
+      "hash": "00a600c9d1305d2840ed895bff06914f8434c0cf21490f84a19affbfec744a47"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
-      "hash": "88a70d0047a638703834ace327596e95b233745f9f60fda2430c0800fb30f030"
+      "hash": "260d0888e41d675cdbcdb8d307528d1a8ac6a5c55c62fea04e810e89fbd7df10"
     },
     "training_pool_clean": {
       "path": "dataset/v2/training_pool_clean.jsonl",
-      "hash": "db0d3b66881a09497ad15ce61edf2505fc4a8d61be7317ead4caee74f1a0466c"
+      "hash": "ad79f745dbba6501f7df409ee4ddd1f538f458c750b461d22ac4857d8ed2acc2"
     },
     "training_pool_experimental": {
       "path": "dataset/v2/training_pool_experimental.jsonl",
-      "hash": "ac0d9b3fa315b40b16c05c0d36db088181e7fcebc3d029f8e4737740e6c507bc"
+      "hash": "50ef9fd799787ba47a8b8a65e25bd5e7cd999cbd8d91d2d42f661490a82019b0"
     }
   },
   "metrics": {
-    "input_total": 18076,
-    "filtered_total": 16159,
-    "chunked_source_records": 1456,
-    "chunked_total_records": 17964,
-    "rebalanced_total_records": 10076,
+    "input_total": 16485,
+    "filtered_total": 14879,
+    "chunked_source_records": 1311,
+    "chunked_total_records": 16422,
+    "rebalanced_total_records": 8967,
     "dropped_test_records": 0,
-    "augmented_records": 3587,
-    "augmentation_candidate_pool": 4783,
-    "final_total": 13663,
-    "test_ratio_before_rebalance": 0.4391,
+    "augmented_records": 3231,
+    "augmentation_candidate_pool": 4309,
+    "final_total": 12198,
+    "test_ratio_before_rebalance": 0.454,
     "test_ratio_after_rebalance": 0.0,
-    "split_train": 10929,
-    "split_valid": 1366,
-    "split_test": 1368,
-    "eval_candidate_pool_size": 7888,
+    "split_train": 9758,
+    "split_valid": 1219,
+    "split_test": 1221,
+    "eval_candidate_pool_size": 7455,
     "exclude_test_sources_from_training_pool": true,
+    "exclude_sources_prefixes": [
+      "docs/symfony_com/"
+    ],
     "yield_breakdown": {
-      "input_records": 18076,
-      "after_validation_filter": 16159,
-      "after_chunking": 17964,
-      "after_test_pool_extraction": 10076,
-      "after_augmentation": 13663,
-      "rejected_records": 1917
+      "input_records": 16485,
+      "after_validation_filter": 14879,
+      "after_chunking": 16422,
+      "after_test_pool_extraction": 8967,
+      "after_augmentation": 12198,
+      "rejected_records": 1637
     },
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
       "weak_categories": [
+        "attributes",
         "sdc",
         "di"
       ],
       "details": [
+        {
+          "category": "attributes",
+          "negative_prompt_count": 1,
+          "avg_delta": -0.6
+        },
         {
           "category": "sdc",
           "negative_prompt_count": 1,
@@ -93,24 +102,25 @@
       ]
     },
     "rejection_reasons": {
-      "malformed_instruction_class_slot": 1908,
-      "truncation_artifact": 4,
-      "class_trait_mismatch": 1,
+      "malformed_instruction_class_slot": 1599,
+      "class_interface_mismatch": 2,
+      "truncation_artifact": 3,
       "class_enum_mismatch": 1,
-      "class_interface_mismatch": 3,
-      "augmentation_non_php_source": 4064,
-      "augmentation_chunked_source": 551,
-      "augmentation_non_php_output": 678
+      "class_trait_mismatch": 1,
+      "excluded_source_prefix": 31,
+      "augmentation_non_php_source": 3507,
+      "augmentation_chunked_source": 518,
+      "augmentation_non_php_output": 633
     },
     "sample_type_distribution": {
-      "retrieval": 10076,
-      "bugfix": 897,
-      "refactor": 897,
-      "write_from_spec": 897,
-      "explain_and_implement": 896
+      "retrieval": 8967,
+      "bugfix": 808,
+      "refactor": 808,
+      "write_from_spec": 808,
+      "explain_and_implement": 807
     },
-    "clean_pool_size": 10076,
-    "experimental_pool_size": 3587
+    "clean_pool_size": 8967,
+    "experimental_pool_size": 3231
   },
   "config": {
     "input_version": "v1",
@@ -120,6 +130,9 @@
     "chunk_overlap_lines": 30,
     "target_test_ratio": 0.15,
     "exclude_test_sources_from_training_pool": true,
+    "exclude_sources_prefixes": [
+      "docs/symfony_com/"
+    ],
     "augmentation": {
       "enabled": true,
       "ratio": 0.75,

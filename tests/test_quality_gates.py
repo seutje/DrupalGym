@@ -85,6 +85,23 @@ class QualityGateHelpersTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "numeric_line_streak")
 
+    def test_numeric_fenced_block_rejected(self):
+        sample = {
+            "instruction": "Explain the following topic based on Drupal 11 documentation: Components",
+            "input": "",
+            "output": (
+                "Drupal 11 component docs.\n"
+                "```text\n"
+                "1\n2\n3\n4\n5\n6\n7\n8\n"
+                "```\n"
+                "Use proper SDC patterns.\n"
+            ),
+            "metadata": {"source": "doc.md"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "numeric_code_block_artifact")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ SYMBOL_PROMPT_RE = re.compile(
 )
 PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
+FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
 
 
 class QualityGate:
@@ -57,6 +58,18 @@ class QualityGate:
         max_count = max(counts.values(), default=0)
         return max_count / len(lines) if lines else 0.0
 
+    @staticmethod
+    def _has_predominantly_numeric_fenced_block(output: str) -> bool:
+        for match in FENCED_BLOCK_RE.finditer(output):
+            block = match.group(1)
+            lines = [line.strip() for line in block.splitlines() if line.strip()]
+            if len(lines) < 6:
+                continue
+            numeric_lines = sum(1 for line in lines if NUMERIC_LINE_RE.match(line))
+            if numeric_lines / len(lines) >= 0.8:
+                return True
+        return False
+
     def _php_lint_ok(self, output: str) -> bool:
         if not self.run_php_lint or not self.php_bin:
             return True
@@ -98,6 +111,8 @@ class QualityGate:
         repeated_ratio = self._repeated_line_ratio(output)
         if repeated_ratio >= self.max_repeated_line_ratio:
             return False, "repetitive_output"
+        if self._has_predominantly_numeric_fenced_block(output):
+            return False, "numeric_code_block_artifact"
 
         output_hash = __import__("hashlib").sha256(output.encode("utf-8", errors="ignore")).hexdigest()
         if output_hash in self.seen_output_hashes:

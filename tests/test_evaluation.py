@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from pipeline.evaluation import (
+    _build_generation_kwargs,
     _compute_format_sanity,
     _extract_code_blocks,
     _load_model_for_evaluation,
@@ -12,6 +13,20 @@ from pipeline.evaluation import (
 
 
 class EvaluationHelpersTest(unittest.TestCase):
+    def test_build_generation_kwargs_includes_repetition_controls(self):
+        class FakeTokenizer:
+            pad_token_id = 0
+            eos_token_id = 2
+
+        kwargs = _build_generation_kwargs(
+            FakeTokenizer(),
+            max_new_tokens=256,
+            eval_cfg={"repetition_penalty": 1.1, "no_repeat_ngram_size": 4},
+        )
+        self.assertEqual(kwargs["max_new_tokens"], 256)
+        self.assertEqual(kwargs["repetition_penalty"], 1.1)
+        self.assertEqual(kwargs["no_repeat_ngram_size"], 4)
+
     def test_extract_code_blocks_from_fences(self):
         text = (
             "Example\n"

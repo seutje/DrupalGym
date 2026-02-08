@@ -60,6 +60,8 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
         "run_php_lint": True,
         "run_phpcs": False,
         "max_code_checks_per_response": 3,
+        "repetition_penalty": 1.0,
+        "no_repeat_ngram_size": 0,
         "prompt_suite": DEFAULT_PROMPT_SUITE,
     }
     merged = defaults | config.get("evaluation", {})
@@ -71,6 +73,8 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
     merged["max_code_checks_per_response"] = int(
         merged.get("max_code_checks_per_response", defaults["max_code_checks_per_response"])
     )
+    merged["repetition_penalty"] = float(merged.get("repetition_penalty", defaults["repetition_penalty"]))
+    merged["no_repeat_ngram_size"] = int(merged.get("no_repeat_ngram_size", defaults["no_repeat_ngram_size"]))
     return merged
 
 
@@ -102,20 +106,31 @@ def _model_input_device(model) -> Any:
         return first_param.device
 
 
-def _generate_response(model, tokenizer, instruction: str, input_text: str, max_new_tokens: int) -> str:
+def _build_generation_kwargs(tokenizer, max_new_tokens: int, eval_cfg: dict[str, Any]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "max_new_tokens": max_new_tokens,
+        "do_sample": False,
+        "pad_token_id": tokenizer.pad_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+    }
+    repetition_penalty = float(eval_cfg.get("repetition_penalty", 1.0))
+    if repetition_penalty > 1.0:
+        kwargs["repetition_penalty"] = repetition_penalty
+    no_repeat_ngram_size = int(eval_cfg.get("no_repeat_ngram_size", 0))
+    if no_repeat_ngram_size > 0:
+        kwargs["no_repeat_ngram_size"] = no_repeat_ngram_size
+    return kwargs
+
+
+def _generate_response(model, tokenizer, instruction: str, input_text: str, max_new_tokens: int, eval_cfg: dict[str, Any]) -> str:
     prompt = _build_prompt(instruction, input_text)
     inputs = tokenizer(prompt, return_tensors="pt")
     input_device = _model_input_device(model)
     inputs = {key: value.to(input_device) for key, value in inputs.items()}
 
     with __import__("torch").no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
+        generation_kwargs = _build_generation_kwargs(tokenizer, max_new_tokens=max_new_tokens, eval_cfg=eval_cfg)
+        outputs = model.generate(**inputs, **generation_kwargs)
 
     prompt_tokens = inputs["input_ids"].shape[1]
     response_tokens = outputs[0][prompt_tokens:]
@@ -695,6 +710,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         instruction=instruction,
                         input_text=input_text,
                         max_new_tokens=int(eval_cfg["max_new_tokens"]),
+                        eval_cfg=eval_cfg,
                     )
 
                     checks, required = _required_checks_for_prompt(prompt_id, output)
@@ -779,6 +795,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
 __all__ = [
     "run_evaluation_stage",
     "summarize_results",
+    "_build_generation_kwargs",
     "_extract_code_blocks",
     "_required_checks_for_prompt",
     "_score_result",

@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import torch
 
 def patch_torch_matmul():
@@ -47,17 +49,11 @@ def patch_torch_matmul():
 patch_torch_matmul()
 
 from pathlib import Path
-from datasets import load_dataset
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    TrainingArguments,
-    Trainer,
-    DataCollatorForLanguageModeling
-)
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from .logger import PipelineLogger
+
+NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
+FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
+OUTPUT_MARKER = "Output:"
 
 def _resolve_dtype(dtype_name: str):
     if dtype_name == "bfloat16":
@@ -66,6 +62,110 @@ def _resolve_dtype(dtype_name: str):
         return torch.float32
     return torch.float16
 
+
+def _find_subsequence(tokens: list[int], pattern: list[int]) -> int:
+    if not pattern or len(pattern) > len(tokens):
+        return -1
+    limit = len(tokens) - len(pattern) + 1
+    for idx in range(limit):
+        if tokens[idx : idx + len(pattern)] == pattern:
+            return idx
+    return -1
+
+
+def _build_completion_labels(token_ids: list[int], marker_tokens: list[int]) -> list[int]:
+    labels = list(token_ids)
+    marker_index = _find_subsequence(token_ids, marker_tokens)
+    if marker_index >= 0:
+        response_start = marker_index + len(marker_tokens)
+        for idx in range(response_start):
+            labels[idx] = -100
+        return labels
+    return [-100] * len(labels)
+
+
+def _has_predominantly_numeric_fenced_block(output: str) -> bool:
+    for match in FENCED_BLOCK_RE.finditer(output):
+        block = match.group(1)
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 6:
+            continue
+        numeric_lines = sum(1 for line in lines if NUMERIC_LINE_RE.match(line))
+        if numeric_lines / len(lines) >= 0.8:
+            return True
+    return False
+
+
+def _numeric_line_streak(output: str) -> int:
+    max_streak = 0
+    current_streak = 0
+    for line in output.splitlines():
+        if NUMERIC_LINE_RE.match(line.strip()):
+            current_streak += 1
+            max_streak = max(max_streak, current_streak)
+        else:
+            current_streak = 0
+    return max_streak
+
+
+def _repeated_line_ratio(output: str) -> float:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if len(lines) < 20:
+        return 0.0
+    counts: dict[str, int] = {}
+    for line in lines:
+        counts[line] = counts.get(line, 0) + 1
+    return max(counts.values()) / len(lines) if counts else 0.0
+
+
+def _audit_dataset_artifacts(
+    *,
+    dataset_dir: Path,
+    logger: PipelineLogger,
+    max_numeric_line_streak: int,
+    max_repeated_line_ratio: float,
+) -> bool:
+    split_names = ("train", "valid")
+    summary = {
+        "checked_samples": 0,
+        "failed_samples": 0,
+        "reasons": {
+            "numeric_line_streak": 0,
+            "repetitive_output": 0,
+            "numeric_code_block_artifact": 0,
+        },
+    }
+
+    for split_name in split_names:
+        split_path = dataset_dir / f"{split_name}.jsonl"
+        if not split_path.exists():
+            continue
+        with open(split_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                sample = json.loads(line)
+                output = str(sample.get("output", ""))
+                summary["checked_samples"] += 1
+                failed = False
+
+                if _numeric_line_streak(output) > max_numeric_line_streak:
+                    summary["reasons"]["numeric_line_streak"] += 1
+                    failed = True
+                if _repeated_line_ratio(output) > max_repeated_line_ratio:
+                    summary["reasons"]["repetitive_output"] += 1
+                    failed = True
+                if _has_predominantly_numeric_fenced_block(output):
+                    summary["reasons"]["numeric_code_block_artifact"] += 1
+                    failed = True
+
+                if failed:
+                    summary["failed_samples"] += 1
+
+    logger.info("Dataset artifact audit completed.", **summary)
+    return summary["failed_samples"] == 0
+
 def train_model(
     model_config: dict,
     dataset_dir: Path,
@@ -73,6 +173,17 @@ def train_model(
     logger: PipelineLogger,
     train_cfg: dict,
 ):
+    from datasets import load_dataset
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        BitsAndBytesConfig,
+        TrainingArguments,
+        Trainer,
+        default_data_collator,
+    )
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
     model_name = model_config["base_model"]
     logger.info(f"Starting training for {model_name}")
 
@@ -88,11 +199,14 @@ def train_model(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
+    marker_tokens = tokenizer(OUTPUT_MARKER, add_special_tokens=False)["input_ids"]
+
     def tokenize_function(examples):
         texts = [f"Instruction: {ins}\nInput: {inp}\nOutput: {out}" 
                  for ins, inp, out in zip(examples["instruction"], examples["input"], examples["output"])]
-        # Use dynamic padding instead of max_length to save VRAM
-        return tokenizer(texts, truncation=True, max_length=train_cfg["max_seq_len"])
+        tokenized = tokenizer(texts, truncation=True, max_length=train_cfg["max_seq_len"])
+        tokenized["labels"] = [_build_completion_labels(token_ids, marker_tokens) for token_ids in tokenized["input_ids"]]
+        return tokenized
 
     tokenized_datasets = dataset.map(tokenize_function, batched=True, remove_columns=dataset["train"].column_names)
 
@@ -157,7 +271,7 @@ def train_model(
         args=training_args,
         train_dataset=tokenized_datasets["train"],
         eval_dataset=tokenized_datasets["validation"],
-        data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+        data_collator=default_data_collator,
     )
 
     # 5. Execute Training
@@ -211,6 +325,16 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
         "max_models": 1,
     }
     train_cfg = default_cfg | config.get("training", {}).get(mode, {})
+    quality_cfg = config.get("quality", {})
+
+    if not _audit_dataset_artifacts(
+        dataset_dir=dataset_dir,
+        logger=logger,
+        max_numeric_line_streak=int(quality_cfg.get("max_numeric_line_streak", 12)),
+        max_repeated_line_ratio=float(quality_cfg.get("max_repeated_line_ratio", 0.15)),
+    ):
+        logger.error("Dataset artifact audit failed; aborting training run.")
+        return 1
     
     models_to_train = train_cfg.get("models", config.get("models", []))
     if not models_to_train:

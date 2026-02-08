@@ -4,6 +4,7 @@ from pipeline.dataset_refinement import (
     _chunk_sample,
     _is_augmentation_candidate,
     _rebalance_test_ratio,
+    _source_matches_prefix,
     _split_dataset,
     _validate_sample,
 )
@@ -177,6 +178,27 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         passed, reason = _validate_sample(sample)
         self.assertFalse(passed)
         self.assertEqual(reason, "numeric_line_streak_artifact")
+
+    def test_validate_rejects_numeric_fenced_block_artifact(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+            "input": "",
+            "output": "<?php\n```\n1\n2\n3\n4\n5\n6\n7\n8\n```\nclass Example {}\n",
+            "metadata": {"source": "repos/example/src/Example.php"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "numeric_code_block_artifact")
+
+    def test_source_prefix_match(self):
+        sample = {
+            "instruction": "Explain",
+            "input": "",
+            "output": "text",
+            "metadata": {"source": "docs/symfony_com/doc/7.0/security/csrf.md"},
+        }
+        self.assertTrue(_source_matches_prefix(sample, ["docs/symfony_com/"]))
+        self.assertFalse(_source_matches_prefix(sample, ["docs/drupal_org/"]))
 
 
 if __name__ == "__main__":

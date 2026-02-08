@@ -67,6 +67,8 @@ quality:
   run_php_lint: true
   min_output_chars: 220
   max_output_chars: 30000
+  max_numeric_line_streak: 12
+  max_repeated_line_ratio: 0.15
 
 dataset:
   training_version: "v2"
@@ -84,6 +86,8 @@ dataset_refinement:
   chunk_overlap_lines: 30
   target_test_ratio: 0.15
   exclude_test_sources_from_training_pool: true
+  exclude_sources_prefixes:
+    - "docs/symfony_com/"
   augmentation:
     enabled: true
     ratio: 0.75
@@ -158,6 +162,8 @@ evaluation:
   run_php_lint: true
   run_phpcs: false
   max_code_checks_per_response: 3
+  repetition_penalty: 1.1
+  no_repeat_ngram_size: 4
 
 export:
   formats: ["safetensors", "gguf"]
@@ -165,9 +171,9 @@ export:
     gguf: ["Q4_K_M", "Q8_0"]
   merge_adapters: true
   tools:
-    llama_cpp_dir:
-    convert_hf_to_gguf:
-    llama_quantize:
+    llama_cpp_dir: "/home/seutje/projects/llama.cpp"
+    convert_hf_to_gguf: "/home/seutje/projects/llama.cpp/convert_hf_to_gguf.py"
+    llama_quantize: "/home/seutje/projects/llama.cpp/build/bin/llama-quantize"
 
 models:
   - name: "Qwen2.5-Coder-7B"
