@@ -158,6 +158,96 @@ class QualityGateHelpersTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "path_leakage_token")
 
+    def test_ambiguous_instruction_input_pair_rejected(self):
+        gate = QualityGate(
+            _DummyLogger(),
+            config={
+                "run_php_lint": False,
+                "min_output_chars": 10,
+                "max_output_chars": 5000,
+                "reject_path_leakage_tokens": False,
+                "reject_ambiguous_instruction_input": True,
+                "max_outputs_per_instruction_input": 1,
+            },
+        )
+        first = {
+            "instruction": "Provide the Drupal 11 YAML configuration from <source_file>.",
+            "input": "Source file: <source_file>\nFile name hint: one.yml\n",
+            "output": "name: one\nvalue: 1\nstatus: true\n",
+            "metadata": {"source": "docs/www_drupal_org/one.yml", "type": "yaml_reference"},
+        }
+        second = {
+            "instruction": "Provide the Drupal 11 YAML configuration from <source_file>.",
+            "input": "Source file: <source_file>\nFile name hint: one.yml\n",
+            "output": "name: two\nvalue: 2\nstatus: true\n",
+            "metadata": {"source": "docs/www_drupal_org/two.yml", "type": "yaml_reference"},
+        }
+        ok1, reason1 = gate.check_sample(first)
+        ok2, reason2 = gate.check_sample(second)
+        self.assertTrue(ok1)
+        self.assertEqual(reason1, "")
+        self.assertFalse(ok2)
+        self.assertEqual(reason2, "ambiguous_instruction_input_pair")
+
+    def test_missing_context_input_rejected_for_required_type(self):
+        gate = QualityGate(
+            _DummyLogger(),
+            config={
+                "run_php_lint": False,
+                "min_output_chars": 10,
+                "max_output_chars": 5000,
+                "require_non_empty_input_for_types": ["yaml_reference"],
+            },
+        )
+        sample = {
+            "instruction": "Provide the Drupal 11 YAML configuration from <source_file>.",
+            "input": "",
+            "output": "name: DrupalGym\nstatus: true\n",
+            "metadata": {"source": "docs/www_drupal_org/site.yml", "type": "yaml_reference"},
+        }
+        ok, reason = gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "missing_context_input")
+
+    def test_doc_source_allowlist_and_topic_denylist(self):
+        gate = QualityGate(
+            _DummyLogger(),
+            config={
+                "run_php_lint": False,
+                "min_output_chars": 10,
+                "max_output_chars": 5000,
+                "doc_source_allowlist_prefixes": ["docs/www_drupal_org/"],
+                "doc_topic_denylist_terms": ["mcp"],
+            },
+        )
+        bad_topic = {
+            "instruction": "Explain the following topic based on Drupal 11 documentation: MCP Client",
+            "input": "Source file: <source_file>",
+            "output": (
+                "This content is long enough to pass length checks for this unit test case. "
+                "It includes enough alphabetic characters and multiple explanatory phrases "
+                "to avoid summary mismatch rejections."
+            ),
+            "metadata": {"source": "docs/www_drupal_org/docs/mcp.md", "type": "doc_summary", "topic": "MCP Client"},
+        }
+        ok, reason = gate.check_sample(bad_topic)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "doc_topic_denied")
+
+        bad_source = {
+            "instruction": "Explain the following topic based on Drupal 11 documentation: State API",
+            "input": "Source file: <source_file>",
+            "output": (
+                "This content is long enough to pass length checks for this unit test case. "
+                "It includes enough alphabetic characters and multiple explanatory phrases "
+                "to avoid summary mismatch rejections."
+            ),
+            "metadata": {"source": "repos/mcp_tools/README.md", "type": "doc_summary", "topic": "State API"},
+        }
+        ok, reason = gate.check_sample(bad_source)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "doc_source_not_allowed")
+
 
 if __name__ == "__main__":
     unittest.main()

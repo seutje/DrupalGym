@@ -62,7 +62,19 @@ normalization:
 
 sft_generation:
   enable_symbol_kind_prompts: true
+  enable_sdc_bundle_generation: true
+  sdc_bundle_variants: 4
   include_extensions: [".php", ".module", ".inc", ".install", ".theme", ".yml", ".twig", ".md"]
+  doc_source_allowlist_prefixes:
+    - "docs/www_drupal_org/"
+    - "docs/api_drupal_org/"
+    - "repos/drupal_core/"
+  doc_topic_denylist_terms:
+    - "mcp"
+    - "apidog"
+    - "gitlab duo"
+    - "workflow automation"
+  doc_max_output_chars: 6000
 
 quality:
   run_php_lint: true
@@ -74,14 +86,32 @@ quality:
     code_reference: 220
     yaml_reference: 10
     twig_reference: 120
+    sdc_reference: 120
     doc_summary: 180
   max_output_chars_by_type:
     code_reference: 24000
     yaml_reference: 8000
     twig_reference: 12000
+    sdc_reference: 12000
     doc_summary: 12000
   max_numeric_line_streak: 12
   max_repeated_line_ratio: 0.31
+  duplicate_output_mode: "normalized"
+  reject_ambiguous_instruction_input: true
+  max_outputs_per_instruction_input: 1
+  require_non_empty_input_for_types:
+    - "yaml_reference"
+    - "twig_reference"
+    - "sdc_reference"
+  doc_source_allowlist_prefixes:
+    - "docs/www_drupal_org/"
+    - "docs/api_drupal_org/"
+    - "repos/drupal_core/"
+  doc_topic_denylist_terms:
+    - "mcp"
+    - "apidog"
+    - "gitlab duo"
+    - "workflow automation"
 
 dataset:
   training_version: "v2"
@@ -97,12 +127,37 @@ dataset_refinement:
   seed: 42
   max_output_lines: 300
   max_output_chars: 6000
-  max_source_share: 0.45
+  max_source_share: 0.55
+  deduplicate_normalized_output: true
+  duplicate_resolution: "prefer_augmented_drop_retrieval"
+  require_context_for_types:
+    - "yaml_reference"
+    - "twig_reference"
+    - "code_reference"
+    - "sdc_reference"
   chunk_instruction_mode: "metadata_only"
   weak_category_targets:
     attributes: 600
     di: 600
     sdc: 400
+  weak_category_patterns:
+    attributes:
+      - "#\\[[A-Za-z_\\\\][A-Za-z0-9_\\\\]*"
+    di:
+      - "\\bContainerInterface\\b"
+      - "public\\s+static\\s+function\\s+create\\s*\\("
+      - "services\\.yml"
+      - "logger\\.factory"
+    routing:
+      - "routing\\.yml"
+      - "\\broute_name\\b"
+      - "\\b_controller\\b"
+      - "\\bpath:\\s*['\\\"/]"
+    sdc:
+      - "single\\s+directory\\s+component"
+      - "component\\.yml"
+      - "\\.component\\.yml"
+      - "\\bsdc\\b"
   chunk_overlap_lines: 30
   target_test_ratio: 0.15
   exclude_test_sources_from_training_pool: true
@@ -111,7 +166,7 @@ dataset_refinement:
   augmentation:
     enabled: true
     ratio: 0.75
-    input_excerpt_lines: 120
+    input_excerpt_lines: 60
     types:
       - "bugfix"
       - "refactor"

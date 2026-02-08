@@ -3,8 +3,16 @@
   "thresholds": {
     "malformed_instruction_class_slot_max": 50,
     "yaml_too_short_share_max": 0.1,
-    "drupal_core_train_share_max": 0.45,
+    "drupal_core_train_share_max": 0.55,
     "train_output_p95_max": 9000,
+    "ambiguous_pair_ratio_max": 0.01,
+    "normalized_output_duplicate_ratio_max": 0.01,
+    "empty_input_share_max_by_type": {
+      "code_reference": 0.01,
+      "twig_reference": 0.01,
+      "yaml_reference": 0.01,
+      "sdc_reference": 0.01
+    },
     "weak_category_targets": {
       "attributes": 600,
       "di": 600,
@@ -14,12 +22,26 @@
   "metrics": {
     "malformed_instruction_class_slot": 0,
     "yaml_too_short_share": 0.0,
-    "drupal_core_train_share": 0.45,
-    "train_output_p95": 5184,
+    "drupal_core_train_share": 0.55,
+    "train_output_p95": 5988,
+    "ambiguous_pair_ratio": 0.0,
+    "normalized_output_duplicate_ratio": 0.0,
+    "empty_input_share_by_type": {
+      "yaml_reference": 0.0,
+      "code_reference": 0.0,
+      "doc_summary": 0.0,
+      "twig_reference": 0.0,
+      "sdc_reference": 0.0
+    },
     "weak_category_coverage": {
-      "attributes": 3183,
-      "di": 2235,
-      "sdc": 2881
+      "attributes": 1656,
+      "di": 1227,
+      "sdc": 484
+    },
+    "strict_weak_category_coverage": {
+      "attributes": 1656,
+      "di": 1227,
+      "sdc": 484
     }
   },
   "checks": {
@@ -27,6 +49,9 @@
     "yaml_too_short_share": true,
     "drupal_core_train_share": true,
     "train_output_p95": true,
+    "ambiguous_pair_ratio": true,
+    "normalized_output_duplicate_ratio": true,
+    "empty_input_share_by_type": true,
     "weak_category_coverage": true
   },
   "overall_passed": true

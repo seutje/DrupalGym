@@ -16,6 +16,7 @@ PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
 PROCEDURAL_EXTENSIONS = (".module", ".install", ".inc", ".theme", ".profile")
+WHITESPACE_RE = re.compile(r"\s+")
 ROOT_PROCEDURAL_PHP = {
     "index.php",
     "update.php",
@@ -56,6 +57,26 @@ class QualityGate:
         self.path_leakage_tokens = [str(token).lower() for token in cfg.get("path_leakage_tokens", ["repos/"])]
         self.max_numeric_line_streak = int(cfg.get("max_numeric_line_streak", 40))
         self.max_repeated_line_ratio = float(cfg.get("max_repeated_line_ratio", 0.25))
+        self.duplicate_output_mode = str(cfg.get("duplicate_output_mode", "exact")).strip().lower()
+        if self.duplicate_output_mode not in {"exact", "normalized"}:
+            self.duplicate_output_mode = "exact"
+        self.reject_ambiguous_instruction_input = bool(cfg.get("reject_ambiguous_instruction_input", True))
+        self.max_outputs_per_instruction_input = int(cfg.get("max_outputs_per_instruction_input", 1))
+        self.require_non_empty_input_for_types = {
+            str(sample_type).strip()
+            for sample_type in cfg.get("require_non_empty_input_for_types", [])
+            if str(sample_type).strip()
+        }
+        self.doc_source_allowlist_prefixes = [
+            str(prefix).strip().lower()
+            for prefix in cfg.get("doc_source_allowlist_prefixes", [])
+            if str(prefix).strip()
+        ]
+        self.doc_topic_denylist_terms = [
+            str(term).strip().lower()
+            for term in cfg.get("doc_topic_denylist_terms", [])
+            if str(term).strip()
+        ]
 
         self.rejected_count = 0
         self.passed_count = 0
@@ -64,6 +85,7 @@ class QualityGate:
         self.rejection_reasons_by_type: dict[str, dict[str, int]] = {}
         self.passed_output_lengths: list[int] = []
         self.seen_output_hashes: set[str] = set()
+        self.instruction_input_outputs: dict[tuple[str, str], set[str]] = {}
 
     def _effective_min_chars(self, sample_type: str) -> int:
         return int(self.min_output_chars_by_type.get(sample_type, self.min_output_chars))
@@ -115,6 +137,22 @@ class QualityGate:
                 return True
         return False
 
+    @staticmethod
+    def _normalize_for_hash(content: str) -> str:
+        return WHITESPACE_RE.sub(" ", content).strip()
+
+    def _output_hash(self, output: str) -> str:
+        payload = output
+        if self.duplicate_output_mode == "normalized":
+            payload = self._normalize_for_hash(output)
+        return __import__("hashlib").sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
+
+    def _doc_source_allowed(self, source: str) -> bool:
+        if not self.doc_source_allowlist_prefixes:
+            return True
+        source_lower = source.lower()
+        return any(source_lower.startswith(prefix) for prefix in self.doc_source_allowlist_prefixes)
+
     def _php_lint_ok(self, output: str) -> bool:
         if not self.run_php_lint or not self.php_bin:
             return True
@@ -140,9 +178,20 @@ class QualityGate:
     def check_sample(self, sample: dict) -> tuple[bool, str]:
         output = sample.get("output", "")
         instruction = sample.get("instruction", "")
+        input_text = str(sample.get("input", ""))
         instruction_lower = instruction.lower()
         sample_type = str(sample.get("metadata", {}).get("type", "unknown") or "unknown")
         source = str(sample.get("metadata", {}).get("source", ""))
+        output_hash = self._output_hash(output)
+
+        pair_key = (instruction.strip(), input_text.strip())
+        if self.reject_ambiguous_instruction_input and self.max_outputs_per_instruction_input > 0:
+            seen_outputs = self.instruction_input_outputs.get(pair_key, set())
+            if output_hash not in seen_outputs and len(seen_outputs) >= self.max_outputs_per_instruction_input:
+                return False, "ambiguous_instruction_input_pair"
+
+        if sample_type in self.require_non_empty_input_for_types and not input_text.strip():
+            return False, "missing_context_input"
 
         if sample_type == "yaml_reference":
             if "yaml configuration" not in instruction_lower:
@@ -156,6 +205,11 @@ class QualityGate:
             alpha_char_count = sum(1 for char in output if char.isalpha())
             if alpha_char_count < 80:
                 return False, "doc_instruction_output_mismatch"
+            topic = str(sample.get("metadata", {}).get("topic", "")).strip().lower()
+            if any(term in topic for term in self.doc_topic_denylist_terms):
+                return False, "doc_topic_denied"
+            if not self._doc_source_allowed(source):
+                return False, "doc_source_not_allowed"
 
         if len(output) < self._effective_min_chars(sample_type):
             return False, "too_short"
@@ -179,10 +233,8 @@ class QualityGate:
         if self._has_predominantly_numeric_fenced_block(output):
             return False, "numeric_code_block_artifact"
 
-        output_hash = __import__("hashlib").sha256(output.encode("utf-8", errors="ignore")).hexdigest()
         if output_hash in self.seen_output_hashes:
             return False, "near_duplicate_content"
-        self.seen_output_hashes.add(output_hash)
 
         boilerplate_terms = ["cookie", "yes, please", "no, do not track me", "sign in", "log in", "create an account"]
         for term in boilerplate_terms:
@@ -243,6 +295,10 @@ class QualityGate:
 
         if not self._php_lint_ok(output):
             return False, "php_syntax_error"
+
+        self.seen_output_hashes.add(output_hash)
+        pair_outputs = self.instruction_input_outputs.setdefault(pair_key, set())
+        pair_outputs.add(output_hash)
 
         return True, ""
 

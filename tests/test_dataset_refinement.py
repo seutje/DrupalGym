@@ -2,7 +2,10 @@ import unittest
 
 from pipeline.dataset_refinement import (
     _build_augmented_sample,
+    _char_chunk_sample,
     _chunk_sample,
+    _compile_category_patterns,
+    _deduplicate_normalized_outputs,
     _enforce_source_share_cap,
     _is_augmentation_candidate,
     _sample_matches_category,
@@ -247,6 +250,46 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         self.assertLessEqual(core["share"], 0.5)
         self.assertEqual(len(kept) + len(dropped), len(samples))
 
+    def test_source_share_cap_preserves_category_matched_samples(self):
+        samples = []
+        for idx in range(80):
+            output = "<?php\nclass CorePlain {}\n"
+            if idx < 5:
+                output = "<?php\n#[Block]\nclass CoreSdcLike {}\n"
+            samples.append(
+                {
+                    "instruction": f"core_{idx}",
+                    "input": "",
+                    "output": output,
+                    "metadata": {"source": f"repos/drupal_core/core/src/Core{idx}.php", "sample_type": "retrieval"},
+                }
+            )
+        for idx in range(20):
+            samples.append(
+                {
+                    "instruction": f"ext_{idx}",
+                    "input": "",
+                    "output": "<?php\nclass Ext {}\n",
+                    "metadata": {"source": f"repos/example/src/Ext{idx}.php", "sample_type": "retrieval"},
+                }
+            )
+
+        patterns = _compile_category_patterns({"attributes": [r"#\[[A-Za-z_\\][A-Za-z0-9_\\]*"]})
+        kept, _dropped, _concentration = _enforce_source_share_cap(
+            samples,
+            max_source_share=0.55,
+            seed=42,
+            preserve_categories=["attributes"],
+            category_patterns=patterns,
+        )
+        preserved = [
+            sample
+            for sample in kept
+            if sample["metadata"]["source"].startswith("repos/drupal_core/")
+            and "#[" in sample["output"]
+        ]
+        self.assertGreaterEqual(len(preserved), 5)
+
     def test_sample_matches_category(self):
         sample = {
             "instruction": "Create a Drupal 11 service with constructor injection.",
@@ -254,8 +297,9 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
             "output": "services:\n  gym.logger:\n    class: Drupal\\gym\\Logger\n",
             "metadata": {"source": "repos/example/gym.services.yml"},
         }
-        self.assertTrue(_sample_matches_category(sample, "di"))
-        self.assertFalse(_sample_matches_category(sample, "sdc"))
+        patterns = _compile_category_patterns()
+        self.assertTrue(_sample_matches_category(sample, "di", category_patterns=patterns))
+        self.assertFalse(_sample_matches_category(sample, "sdc", category_patterns=patterns))
 
     def test_augmented_sample_hides_repo_paths_from_input(self):
         sample = {
@@ -272,6 +316,57 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         )
         self.assertNotIn("repos/", augmented["input"])
         self.assertIn("<source_file>", augmented["input"])
+        self.assertEqual(augmented["metadata"]["sample_type"], "write_from_spec")
+
+    def test_validate_context_requirement_for_types(self):
+        sample = {
+            "instruction": "Provide the Drupal 11 YAML configuration from <source_file>.",
+            "input": "",
+            "output": "name: DrupalGym\nstatus: true\n",
+            "metadata": {"source": "repos/example/example.services.yml", "type": "yaml_reference"},
+        }
+        passed, reason = _validate_sample(sample, require_context_for_types={"yaml_reference"})
+        self.assertFalse(passed)
+        self.assertEqual(reason, "missing_context_input")
+
+    def test_char_chunk_sample_splits_long_char_output(self):
+        long_line = "x" * 2500
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file <source_file>.",
+            "input": "Source file: <source_file>",
+            "output": "\n".join([long_line, long_line, long_line]),
+            "metadata": {"source": "repos/example/src/Example.php", "type": "code_reference"},
+        }
+        chunks = _char_chunk_sample(sample, max_output_chars=3000, overlap_lines=1)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk["output"]), 3000)
+            self.assertIn("char_chunk_index", chunk["metadata"]["refinement"])
+
+    def test_deduplicate_normalized_outputs_prefers_augmented(self):
+        retrieval = {
+            "instruction": "Show me the implementation of the class Example in the file <source_file>.",
+            "input": "Source file: <source_file>",
+            "output": "<?php\n\nclass Example {}\n",
+            "metadata": {"source": "repos/example/src/Example.php", "sample_type": "retrieval"},
+        }
+        bugfix = {
+            "instruction": "Fix this broken Drupal 11 class implementation and return corrected PHP code.",
+            "input": "Source file: <source_file>",
+            "output": "<?php\nclass Example {}\n",
+            "metadata": {
+                "source": "repos/example/src/Example.php",
+                "sample_type": "bugfix",
+                "refinement": {"augmentation_type": "bugfix"},
+            },
+        }
+        kept, dropped = _deduplicate_normalized_outputs(
+            [retrieval, bugfix],
+            resolution="prefer_augmented_drop_retrieval",
+        )
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(len(dropped), 1)
+        self.assertEqual(kept[0]["metadata"]["sample_type"], "bugfix")
 
 
 if __name__ == "__main__":

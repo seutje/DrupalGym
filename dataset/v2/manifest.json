@@ -1,87 +1,103 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-08T11:37:30Z",
+  "timestamp": "2026-02-08T12:28:51Z",
   "inputs": [
     {
       "name": "v1_train",
       "version": "v1",
-      "hash": "e274986cf431cc6ae20e7df78d45809a19f2c4278bf4564518e009dadf9a5a1d"
+      "hash": "988623312c60bbc74491a3296c9ca1c68a4e3599fd8a41ec11a5a7ace1128655"
     },
     {
       "name": "v1_valid",
       "version": "v1",
-      "hash": "6c4c60cc67bdf5ab65afa000cb8b9eba35d8e4195124b8730b76276ae772e13b"
+      "hash": "7bfa7d68ee376f819703351ef985ef9efc2aabba4f070d5b5f944d2bb6b323aa"
     },
     {
       "name": "v1_test",
       "version": "v1",
-      "hash": "d0f4d7cc9ddcda4fd2dfbbec1c28c6e1e3f0a1dc3de984f80079289c5b9ce3b2"
+      "hash": "7667f3c4fd8a59e632d49e6289be344143d973beeb78f22fb64f467c844484fd"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "f9e54da2777e92569fa2fb8d5f06e6d4eef71bdb0546910787738b8472de3230"
+      "hash": "0ec1398d2924da3dc0a7561c31972e90f6284b4e505782c164348410aae14085"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "1f563332bda8b6f5b9ce6e72cdfeb6cf0fcac2b65d531300c11d897fd1229766"
+      "hash": "16b43c2134c8238cd5f411e6959d0405d38111fd26dcf31a2d0c961431b42da6"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "c56293440b81787d48ab6404267788ea3d408dd14e877676c247800b274113bd"
+      "hash": "0951dda66b740a03285fa3d83ddb018f58dee2fe37df1f1fa9ab0945cf727b25"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "145ff865671d8db532e0389ccc5306d67935850ea823a761fbc6619f3e530be5"
+      "hash": "6f980c167c79372854dc2123563b0c2bf5c825eb359c5513537adbbc5a62a8ea"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
-      "hash": "2953f57e2487dccee56c13a5c3ae0554076d84e09de0a8b0b723d7bdad50fe3b"
+      "hash": "99e3804cbace3f8a84c62cb7ccd9aa99dcc1fa35f542adee1c3483109378693a"
     },
     "training_pool_clean": {
       "path": "dataset/v2/training_pool_clean.jsonl",
-      "hash": "194cc98fc807287a60d2096345bb08fb68de8d38416b4620203635180b030e98"
+      "hash": "93c6df8f1c91a24852b1c8994af2d25af56cbf4d76dc9f28519e411f99c9000c"
     },
     "training_pool_experimental": {
       "path": "dataset/v2/training_pool_experimental.jsonl",
-      "hash": "ec9b61d1d3c8efbdc90e2070657d4abf10327d04113752d38cf657a83a01f439"
+      "hash": "9eefe006f380a0a11b784f527d82543629101dc7817a89cbf294985841ba3c5c"
     },
     "quality_scorecard": {
       "path": "dataset/v2/quality_scorecard.json",
-      "hash": "f66bb93d846a77a835afa6584ea6ea15e5d82ca94a0d636f9dc5657e3861e052"
+      "hash": "cd8eb74fefe7e4bc2ba81f725b3c972ad01e77aa159102ab160b071a6fa30632"
     }
   },
   "metrics": {
-    "input_total": 18409,
-    "filtered_total": 18327,
-    "output_char_filtered_total": 15272,
-    "chunked_source_records": 0,
-    "chunked_total_records": 15248,
-    "rebalanced_total_records": 8771,
+    "input_total": 18231,
+    "filtered_total": 18146,
+    "output_char_filtered_total": 23432,
+    "chunked_source_records": 1250,
+    "char_chunked_source_records": 3278,
+    "chunked_total_records": 23432,
+    "rebalanced_total_records": 12999,
     "dropped_test_records": 0,
-    "augmented_records": 4005,
-    "augmentation_candidate_pool": 5341,
-    "source_share_cap_dropped": 4742,
-    "final_total": 8034,
-    "test_ratio_before_rebalance": 0.4248,
+    "augmented_records": 4531,
+    "augmentation_candidate_pool": 6042,
+    "normalized_output_dedup_dropped": 3424,
+    "normalized_output_duplicate_ratio_before_dedup": 0.1953,
+    "normalized_output_duplicate_ratio": 0.0,
+    "ambiguous_pairs": 0,
+    "ambiguous_samples": 0,
+    "ambiguous_pair_ratio": 0.0,
+    "empty_input_share_by_type": {
+      "yaml_reference": 0.0,
+      "code_reference": 0.0,
+      "doc_summary": 0.0,
+      "twig_reference": 0.0,
+      "sdc_reference": 0.0
+    },
+    "source_share_cap_dropped": 1631,
+    "final_total": 12475,
+    "test_ratio_before_rebalance": 0.4452,
     "test_ratio_after_rebalance": 0.0,
-    "split_train": 6427,
-    "split_valid": 803,
-    "split_test": 804,
-    "eval_candidate_pool_size": 6477,
+    "split_train": 9979,
+    "split_valid": 1248,
+    "split_test": 1248,
+    "eval_candidate_pool_size": 10433,
     "exclude_test_sources_from_training_pool": true,
     "exclude_sources_prefixes": [
       "docs/symfony_com/"
     ],
     "yield_breakdown": {
-      "input_records": 18409,
-      "after_validation_filter": 18327,
-      "after_output_char_filter": 15272,
-      "after_chunking": 15248,
-      "after_test_pool_extraction": 8771,
-      "after_augmentation": 8034,
-      "rejected_records": 7903
+      "input_records": 18231,
+      "after_validation_filter": 18146,
+      "after_output_char_filter": 23432,
+      "after_chunking": 23432,
+      "after_test_pool_extraction": 12999,
+      "after_augmentation": 17530,
+      "after_normalized_output_dedup": 14106,
+      "after_source_share_cap": 12475,
+      "rejected_records": 5143
     },
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
@@ -109,99 +125,113 @@
       ]
     },
     "rejection_reasons": {
-      "class_interface_mismatch": 52,
-      "interface_class_mismatch": 10,
+      "class_interface_mismatch": 51,
       "trait_class_mismatch": 10,
       "trait_enum_mismatch": 1,
       "class_enum_mismatch": 3,
-      "truncation_artifact": 3,
+      "interface_class_mismatch": 10,
+      "truncation_artifact": 7,
       "class_trait_mismatch": 2,
       "interface_enum_mismatch": 1,
-      "max_output_chars": 3055,
-      "excluded_source_prefix": 24,
-      "augmentation_non_php_source": 3428,
-      "augmentation_non_php_output": 2,
-      "source_share_cap_drop": 4742
+      "max_output_chars": 3,
+      "augmentation_non_php_source": 3749,
+      "augmentation_non_php_output": 2575,
+      "augmentation_chunked_source": 633,
+      "normalized_output_dedupe_drop": 3424,
+      "source_share_cap_drop": 1631
     },
     "sample_type_distribution": {
-      "retrieval": 8771,
-      "bugfix": 1002,
-      "refactor": 1001,
-      "write_from_spec": 1001,
-      "explain_and_implement": 1001
+      "retrieval": 7944,
+      "bugfix": 1133,
+      "refactor": 1133,
+      "write_from_spec": 1133,
+      "explain_and_implement": 1132
     },
-    "clean_pool_size": 8771,
-    "experimental_pool_size": 4005,
+    "clean_pool_size": 12999,
+    "experimental_pool_size": 4531,
     "source_concentration_top10": [
       {
         "source_prefix": "repos/drupal_core",
-        "count": 3615,
-        "share": 0.45
+        "count": 6861,
+        "share": 0.55
       },
       {
         "source_prefix": "repos/flowdrop",
-        "count": 522,
-        "share": 0.065
-      },
-      {
-        "source_prefix": "repos/mcp_tools",
-        "count": 467,
-        "share": 0.0581
+        "count": 839,
+        "share": 0.0673
       },
       {
         "source_prefix": "repos/api_normalization",
-        "count": 388,
-        "share": 0.0483
+        "count": 522,
+        "share": 0.0418
+      },
+      {
+        "source_prefix": "repos/mcp_tools",
+        "count": 475,
+        "share": 0.0381
       },
       {
         "source_prefix": "repos/display_builder",
-        "count": 291,
-        "share": 0.0362
-      },
-      {
-        "source_prefix": "repos/webprofiler",
-        "count": 178,
-        "share": 0.0222
+        "count": 449,
+        "share": 0.036
       },
       {
         "source_prefix": "docs/www_drupal_org",
-        "count": 170,
-        "share": 0.0212
+        "count": 333,
+        "share": 0.0267
       },
       {
         "source_prefix": "repos/eb",
-        "count": 148,
-        "share": 0.0184
+        "count": 215,
+        "share": 0.0172
       },
       {
         "source_prefix": "repos/bootstrap_components",
-        "count": 122,
-        "share": 0.0152
+        "count": 208,
+        "share": 0.0167
       },
       {
-        "source_prefix": "repos/soap_client",
-        "count": 96,
-        "share": 0.0119
+        "source_prefix": "docs/api_drupal_org",
+        "count": 184,
+        "share": 0.0147
+      },
+      {
+        "source_prefix": "repos/webprofiler",
+        "count": 170,
+        "share": 0.0136
       }
     ],
     "weak_category_coverage": {
-      "attributes": 3183,
-      "di": 2235,
-      "sdc": 2881
+      "attributes": 1656,
+      "di": 1227,
+      "sdc": 484
+    },
+    "strict_weak_category_coverage": {
+      "attributes": 1656,
+      "di": 1227,
+      "sdc": 484
     },
     "train_output_percentiles": {
-      "p50": 1631,
-      "p90": 4488,
-      "p95": 5184,
-      "p99": 5877
+      "p50": 2067,
+      "p90": 5966,
+      "p95": 5988,
+      "p99": 6116
     },
     "quality_scorecard": {
       "dataset_version": "v2",
       "thresholds": {
         "malformed_instruction_class_slot_max": 50,
         "yaml_too_short_share_max": 0.1,
-        "drupal_core_train_share_max": 0.45,
+        "drupal_core_train_share_max": 0.55,
         "train_output_p95_max": 9000,
+        "ambiguous_pair_ratio_max": 0.01,
+        "normalized_output_duplicate_ratio_max": 0.01,
+        "empty_input_share_max_by_type": {
+          "code_reference": 0.01,
+          "twig_reference": 0.01,
+          "yaml_reference": 0.01,
+          "sdc_reference": 0.01
+        },
         "weak_category_targets": {
           "attributes": 600,
           "di": 600,
@@ -211,12 +241,26 @@
       "metrics": {
         "malformed_instruction_class_slot": 0,
         "yaml_too_short_share": 0.0,
-        "drupal_core_train_share": 0.45,
-        "train_output_p95": 5184,
+        "drupal_core_train_share": 0.55,
+        "train_output_p95": 5988,
+        "ambiguous_pair_ratio": 0.0,
+        "normalized_output_duplicate_ratio": 0.0,
+        "empty_input_share_by_type": {
+          "yaml_reference": 0.0,
+          "code_reference": 0.0,
+          "doc_summary": 0.0,
+          "twig_reference": 0.0,
+          "sdc_reference": 0.0
+        },
         "weak_category_coverage": {
-          "attributes": 3183,
-          "di": 2235,
-          "sdc": 2881
+          "attributes": 1656,
+          "di": 1227,
+          "sdc": 484
+        },
+        "strict_weak_category_coverage": {
+          "attributes": 1656,
+          "di": 1227,
+          "sdc": 484
         }
       },
       "checks": {
@@ -224,6 +268,9 @@
         "yaml_too_short_share": true,
         "drupal_core_train_share": true,
         "train_output_p95": true,
+        "ambiguous_pair_ratio": true,
+        "normalized_output_duplicate_ratio": true,
+        "empty_input_share_by_type": true,
         "weak_category_coverage": true
       },
       "overall_passed": true
@@ -235,12 +282,43 @@
     "seed": 42,
     "max_output_lines": 300,
     "max_output_chars": 6000,
-    "max_source_share": 0.45,
+    "max_source_share": 0.55,
+    "deduplicate_normalized_output": true,
+    "duplicate_resolution": "prefer_augmented_drop_retrieval",
+    "require_context_for_types": [
+      "yaml_reference",
+      "twig_reference",
+      "code_reference",
+      "sdc_reference"
+    ],
     "chunk_instruction_mode": "metadata_only",
     "weak_category_targets": {
       "attributes": 600,
       "di": 600,
       "sdc": 400
+    },
+    "weak_category_patterns": {
+      "attributes": [
+        "#\\[[A-Za-z_\\\\][A-Za-z0-9_\\\\]*"
+      ],
+      "di": [
+        "\\bContainerInterface\\b",
+        "public\\s+static\\s+function\\s+create\\s*\\(",
+        "services\\.yml",
+        "logger\\.factory"
+      ],
+      "routing": [
+        "routing\\.yml",
+        "\\broute_name\\b",
+        "\\b_controller\\b",
+        "\\bpath:\\s*['\\\"/]"
+      ],
+      "sdc": [
+        "single\\s+directory\\s+component",
+        "component\\.yml",
+        "\\.component\\.yml",
+        "\\bsdc\\b"
+      ]
     },
     "chunk_overlap_lines": 30,
     "target_test_ratio": 0.15,
@@ -251,7 +329,7 @@
     "augmentation": {
       "enabled": true,
       "ratio": 0.75,
-      "input_excerpt_lines": 120,
+      "input_excerpt_lines": 60,
       "types": [
         "bugfix",
         "refactor",
