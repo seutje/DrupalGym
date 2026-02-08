@@ -1,6 +1,6 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-08T17:57:08Z",
+  "timestamp": "2026-02-08T18:20:52Z",
   "inputs": [
     {
       "name": "v1_train",
@@ -21,11 +21,11 @@
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "3d7eacbc7fdb34728f42affa4b38cfab70c2d3bd41eb795e15a31777363ac163"
+      "hash": "5e2357e2c50917b9bb0dbaea91c262abba1535a382039a81f2ada94b28ed89b5"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "31dab8b6111aec1d4945fca0710484431be9a976013723302d854cc4ee4d94c3"
+      "hash": "569efcc7dbafe774dc93365ed5c6e8e361d12c27ababeaa5eb0a19fe0904d7c7"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
@@ -33,7 +33,7 @@
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "ff90b25804d57ce7f012537645e2b4ee6ddae6e5f662d5fc8f87cd33a4c8a695"
+      "hash": "c921cabb9e5bb310da1370f4422fff4d38b4d3a8ac5a97a06366192eb1fa24a4"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
@@ -49,7 +49,7 @@
     },
     "quality_scorecard": {
       "path": "dataset/v2/quality_scorecard.json",
-      "hash": "af083970c4c8877330b37c91a427f2283fd5ba82435d0f819a0a11cebfa01f3d"
+      "hash": "383a9a5c7b46da117bd57ec2f4057d71f617ad599fd5d6bc54d350fa519c404d"
     }
   },
   "metrics": {
@@ -70,18 +70,18 @@
     "ambiguous_samples": 0,
     "ambiguous_pair_ratio": 0.0,
     "empty_input_share_by_type": {
-      "yaml_reference": 0.0,
-      "doc_summary": 0.0,
-      "twig_reference": 0.0,
       "code_reference": 0.0,
-      "sdc_reference": 0.0
+      "yaml_reference": 0.0,
+      "sdc_reference": 0.0,
+      "twig_reference": 0.0,
+      "doc_summary": 0.0
     },
     "source_share_cap_dropped": 171,
-    "final_total": 10350,
+    "final_total": 10344,
     "test_ratio_before_rebalance": 0.6379,
     "test_ratio_after_rebalance": 0.55,
-    "split_train": 8279,
-    "split_valid": 1035,
+    "split_train": 8277,
+    "split_valid": 1031,
     "split_test": 1036,
     "eval_candidate_pool_size": 0,
     "exclude_test_sources_from_training_pool": false,
@@ -97,8 +97,8 @@
       "after_test_pool_extraction": 10231,
       "after_augmentation": 11391,
       "after_normalized_output_dedup": 10521,
-      "after_source_share_cap": 10350,
-      "rejected_records": 4893
+      "after_source_share_cap": 10344,
+      "rejected_records": 4899
     },
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
@@ -138,32 +138,33 @@
       "augmentation_chunked_source": 182,
       "augmentation_from_test_source": 5627,
       "normalized_output_dedupe_drop": 870,
-      "source_share_cap_drop": 171
+      "source_share_cap_drop": 171,
+      "repetitive_output_artifact": 6
     },
     "sample_type_distribution": {
-      "retrieval": 9190,
+      "retrieval": 9184,
+      "explain_and_implement": 290,
       "bugfix": 290,
       "refactor": 290,
-      "write_from_spec": 290,
-      "explain_and_implement": 290
+      "write_from_spec": 290
     },
     "clean_pool_size": 10231,
     "experimental_pool_size": 1160,
     "source_concentration_top10": [
       {
         "source_prefix": "repos/drupal_core",
-        "count": 9315,
-        "share": 0.9
+        "count": 9309,
+        "share": 0.8999
       },
       {
         "source_prefix": "repos/display_builder",
         "count": 401,
-        "share": 0.0387
+        "share": 0.0388
       },
       {
         "source_prefix": "docs/www_drupal_org",
         "count": 195,
-        "share": 0.0188
+        "share": 0.0189
       },
       {
         "source_prefix": "repos/eb",
@@ -191,25 +192,25 @@
         "share": 0.0023
       },
       {
-        "source_prefix": "repos/eb_field_group",
+        "source_prefix": "repos/queue_manager",
         "count": 13,
         "share": 0.0013
       },
       {
-        "source_prefix": "repos/queue_manager",
+        "source_prefix": "repos/eb_field_group",
         "count": 13,
         "share": 0.0013
       }
     ],
     "weak_category_coverage": {
       "attributes": 3914,
-      "di": 783,
+      "di": 782,
       "sdc": 240,
       "twig": 724
     },
     "strict_weak_category_coverage": {
       "attributes": 3914,
-      "di": 783,
+      "di": 782,
       "sdc": 240,
       "twig": 724
     },
@@ -229,41 +230,41 @@
         "ambiguous_pair_ratio_max": 0.01,
         "normalized_output_duplicate_ratio_max": 0.01,
         "empty_input_share_max_by_type": {
+          "code_reference": 0.01,
           "sdc_reference": 0.01,
           "twig_reference": 0.01,
-          "code_reference": 0.01,
           "yaml_reference": 0.01
         },
         "weak_category_targets": {
           "attributes": 600,
           "di": 600,
-          "sdc": 400,
+          "sdc": 240,
           "twig": 450
         }
       },
       "metrics": {
         "malformed_instruction_class_slot": 0,
         "yaml_too_short_share": 0.0,
-        "drupal_core_train_share": 0.9,
+        "drupal_core_train_share": 0.8999,
         "train_output_p95": 5987,
         "ambiguous_pair_ratio": 0.0,
         "normalized_output_duplicate_ratio": 0.0,
         "empty_input_share_by_type": {
-          "yaml_reference": 0.0,
-          "doc_summary": 0.0,
-          "twig_reference": 0.0,
           "code_reference": 0.0,
-          "sdc_reference": 0.0
+          "yaml_reference": 0.0,
+          "sdc_reference": 0.0,
+          "twig_reference": 0.0,
+          "doc_summary": 0.0
         },
         "weak_category_coverage": {
           "attributes": 3914,
-          "di": 783,
+          "di": 782,
           "sdc": 240,
           "twig": 724
         },
         "strict_weak_category_coverage": {
           "attributes": 3914,
-          "di": 783,
+          "di": 782,
           "sdc": 240,
           "twig": 724
         }
@@ -276,9 +277,9 @@
         "ambiguous_pair_ratio": true,
         "normalized_output_duplicate_ratio": true,
         "empty_input_share_by_type": true,
-        "weak_category_coverage": false
+        "weak_category_coverage": true
       },
-      "overall_passed": false
+      "overall_passed": true
     }
   },
   "config": {
@@ -287,6 +288,7 @@
     "seed": 42,
     "max_output_lines": 300,
     "max_output_chars": 6000,
+    "max_repeated_line_ratio": 0.31,
     "max_source_share": 0.9,
     "deduplicate_normalized_output": true,
     "duplicate_resolution": "prefer_augmented_drop_retrieval",
@@ -300,7 +302,7 @@
     "weak_category_targets": {
       "attributes": 600,
       "di": 600,
-      "sdc": 400,
+      "sdc": 240,
       "twig": 450
     },
     "weak_category_patterns": {

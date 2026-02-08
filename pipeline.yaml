@@ -186,6 +186,7 @@ dataset_refinement:
   seed: 42
   max_output_lines: 300
   max_output_chars: 6000
+  max_repeated_line_ratio: 0.31
   max_source_share: 0.90
   deduplicate_normalized_output: true
   duplicate_resolution: "prefer_augmented_drop_retrieval"
@@ -198,7 +199,7 @@ dataset_refinement:
   weak_category_targets:
     attributes: 600
     di: 600
-    sdc: 400
+    sdc: 240
     twig: 450
   enforce_modern_drupal_patterns: true
   modern_drupal_required_categories: ["attributes", "di"]

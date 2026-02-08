@@ -201,6 +201,18 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         self.assertFalse(passed)
         self.assertEqual(reason, "numeric_line_streak_artifact")
 
+    def test_validate_rejects_repetitive_output_artifact(self):
+        repeated_lines = ["same_line"] * 25
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+            "input": "",
+            "output": "<?php\n" + "\n".join(repeated_lines) + "\n",
+            "metadata": {"source": "repos/example/src/Example.php"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "repetitive_output_artifact")
+
     def test_validate_rejects_numeric_fenced_block_artifact(self):
         sample = {
             "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",

@@ -21,6 +21,7 @@ PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
 MAX_NUMERIC_LINE_STREAK = 12
+DEFAULT_MAX_REPEATED_LINE_RATIO = 0.31
 DEFAULT_WEAK_CATEGORY_PATTERNS: dict[str, list[str]] = {
     "attributes": [r"#\[[A-Za-z_\\][A-Za-z0-9_\\]*"],
     "di": [
@@ -67,6 +68,44 @@ def _has_predominantly_numeric_fenced_block(output: str) -> bool:
         if numeric_lines / len(lines) >= 0.8:
             return True
     return False
+
+
+def _numeric_line_streak(output: str) -> int:
+    max_streak = 0
+    current_streak = 0
+    for line in output.splitlines():
+        if NUMERIC_LINE_RE.match(line.strip()):
+            current_streak += 1
+            if current_streak > max_streak:
+                max_streak = current_streak
+        else:
+            current_streak = 0
+    return max_streak
+
+
+def _repeated_line_ratio(output: str) -> float:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if len(lines) < 20:
+        return 0.0
+    counts: dict[str, int] = {}
+    for line in lines:
+        counts[line] = counts.get(line, 0) + 1
+    return max(counts.values()) / len(lines) if counts else 0.0
+
+
+def _artifact_rejection_reason(
+    output: str,
+    *,
+    max_numeric_line_streak: int = MAX_NUMERIC_LINE_STREAK,
+    max_repeated_line_ratio: float = DEFAULT_MAX_REPEATED_LINE_RATIO,
+) -> str:
+    if _numeric_line_streak(output) >= max_numeric_line_streak:
+        return "numeric_line_streak_artifact"
+    if _repeated_line_ratio(output) > max_repeated_line_ratio:
+        return "repetitive_output_artifact"
+    if _has_predominantly_numeric_fenced_block(output):
+        return "numeric_code_block_artifact"
+    return ""
 
 
 def _load_split_records(split_path: Path, split_name: str) -> list[dict[str, Any]]:
@@ -349,6 +388,7 @@ def _validate_sample(
     sample: dict[str, Any],
     require_context_for_types: set[str] | None = None,
     *,
+    max_repeated_line_ratio: float = DEFAULT_MAX_REPEATED_LINE_RATIO,
     enforce_modern_drupal_patterns: bool = False,
     modern_drupal_required_categories: set[str] | None = None,
     modern_drupal_relevant_types: set[str] | None = None,
@@ -392,19 +432,13 @@ def _validate_sample(
     if PROMPT_WRAPPER_RE.search(output):
         return False, "contains_prompt_wrapper_echo"
 
-    max_numeric_streak = 0
-    current_streak = 0
-    for line in output.splitlines():
-        if NUMERIC_LINE_RE.match(line.strip()):
-            current_streak += 1
-            if current_streak > max_numeric_streak:
-                max_numeric_streak = current_streak
-        else:
-            current_streak = 0
-    if max_numeric_streak >= MAX_NUMERIC_LINE_STREAK:
-        return False, "numeric_line_streak_artifact"
-    if _has_predominantly_numeric_fenced_block(output):
-        return False, "numeric_code_block_artifact"
+    artifact_reason = _artifact_rejection_reason(
+        output,
+        max_numeric_line_streak=MAX_NUMERIC_LINE_STREAK,
+        max_repeated_line_ratio=max_repeated_line_ratio,
+    )
+    if artifact_reason:
+        return False, artifact_reason
 
     stripped = output.rstrip()
     if stripped.count("```") % 2 != 0:
@@ -895,6 +929,7 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
         "seed": seed,
         "max_output_lines": 300,
         "max_output_chars": 6000,
+        "max_repeated_line_ratio": DEFAULT_MAX_REPEATED_LINE_RATIO,
         "max_source_share": 0.55,
         "deduplicate_normalized_output": True,
         "duplicate_resolution": "prefer_augmented_drop_retrieval",
@@ -983,6 +1018,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         for sample_type in refine_cfg.get("require_context_for_types", [])
         if str(sample_type).strip()
     }
+    require_context_for_types_ordered = sorted(require_context_for_types)
     category_patterns = _compile_category_patterns(refine_cfg.get("weak_category_patterns", {}))
     enforce_modern_drupal_patterns = bool(refine_cfg.get("enforce_modern_drupal_patterns", False))
     modern_drupal_required_categories = {
@@ -1009,10 +1045,14 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
     filtered_records: list[dict[str, Any]] = []
     rejected_records: list[dict[str, Any]] = []
     rejection_reasons: dict[str, int] = {}
+    max_repeated_line_ratio = float(
+        refine_cfg.get("max_repeated_line_ratio", DEFAULT_MAX_REPEATED_LINE_RATIO)
+    )
     for sample in records:
         passed, reason = _validate_sample(
             sample,
             require_context_for_types=require_context_for_types,
+            max_repeated_line_ratio=max_repeated_line_ratio,
             enforce_modern_drupal_patterns=enforce_modern_drupal_patterns,
             modern_drupal_required_categories=modern_drupal_required_categories,
             modern_drupal_relevant_types=modern_drupal_relevant_types,
@@ -1218,6 +1258,24 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
 
     split_targets = config.get("dataset", {}).get("targets", {"train": 0.8, "valid": 0.1, "test": 0.1})
     splits = _split_dataset(final_records, split_targets, seed=int(refine_cfg["seed"]) + 101)
+    for split_name, split_samples in splits.items():
+        scrubbed_samples: list[dict[str, Any]] = []
+        for sample in split_samples:
+            reason = _artifact_rejection_reason(
+                str(sample.get("output", "")),
+                max_numeric_line_streak=MAX_NUMERIC_LINE_STREAK,
+                max_repeated_line_ratio=max_repeated_line_ratio,
+            )
+            if not reason:
+                scrubbed_samples.append(sample)
+                continue
+            rejected = copy.deepcopy(sample)
+            rejected["rejection_reason"] = reason
+            rejected_records.append(rejected)
+            rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+        splits[split_name] = scrubbed_samples
+    final_records = [sample for split_name in ("train", "valid", "test") for sample in splits[split_name]]
+    source_concentration_top10 = _source_concentration(final_records, top_n=10)
 
     for split_name, split_samples in splits.items():
         split_path = output_dir / f"{split_name}.jsonl"
@@ -1319,7 +1377,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             "normalized_output_duplicate_ratio_max": 0.01,
             "empty_input_share_max_by_type": {
                 sample_type: 0.01
-                for sample_type in require_context_for_types
+                for sample_type in require_context_for_types_ordered
             },
             "weak_category_targets": weak_category_targets,
         },
@@ -1344,7 +1402,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "normalized_output_duplicate_ratio": normalized_output_duplicate_ratio_after <= 0.01,
         "empty_input_share_by_type": all(
             empty_input_share_by_type.get(sample_type, 0.0) <= 0.01
-            for sample_type in require_context_for_types
+            for sample_type in require_context_for_types_ordered
         )
         if require_context_for_types
         else True,
