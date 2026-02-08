@@ -127,16 +127,17 @@ training:
   full_scale:
     max_seq_len: 2048
     num_train_epochs: 3
-    max_steps: 70
-    per_device_train_batch_size: 1
+    max_steps: 450
+    per_device_train_batch_size: 2
     per_device_eval_batch_size: 1
-    gradient_accumulation_steps: 32 # L40S-safe effective batch for current dataset volume
-    learning_rate: 0.0002
+    gradient_accumulation_steps: 16 # L40S-safe effective batch for current dataset volume
+    learning_rate: 0.0001
     logging_steps: 1
     eval_strategy: "steps"
-    eval_steps: 20
+    eval_steps: 50
     save_strategy: "steps"
-    save_steps: 20
+    save_steps: 50
+    warmup_ratio: 0.1 # ~45 warmup steps for a 450-step run
     fp16: false
     bf16: true
     gradient_checkpointing: true
