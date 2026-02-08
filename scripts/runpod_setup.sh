@@ -17,7 +17,7 @@ pip install -r requirements.txt
 # Install Unsloth for optimized training if possible
 # Note: Unsloth installation can be tricky depending on the CUDA version.
 # For H100 (sm_90), we use the following:
-pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+#pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 pip install --no-deps "xformers<0.0.27" "trl<0.9.0" peft accelerate bitsandbytes
 
 echo "Setup complete. You can now run the pipeline."
