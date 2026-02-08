@@ -455,11 +455,13 @@ class InstructionGenerator:
 
         if len(title) < 5 or title_lower in generic_titles:
             return
-        if any(term in title_lower for term in self.doc_topic_denylist_terms):
+        content_lower = content.lower()
+        deny_blob = "\n".join([title_lower, content_lower])
+        if any(term in deny_blob for term in self.doc_topic_denylist_terms):
             return
         if any(token in title_lower for token in ["cookie", "sign in", "tracking", "web beacon"]):
             return
-        if "drupal 7" in content.lower() and "drupal 11" not in content.lower() and "drupal 10" not in content.lower():
+        if "drupal 7" in content_lower and "drupal 11" not in content_lower and "drupal 10" not in content_lower:
             return
 
         output_text = self._build_doc_output(content, title)
@@ -510,6 +512,11 @@ def run_sft_generation_stage(config: dict, logger: PipelineLogger, root: Path):
         [".php", ".module", ".inc", ".install", ".theme", ".yml", ".twig", ".md"],
     )
     include_extensions = {suffix.lower() for suffix in include_extensions}
+    exclude_source_prefixes = [
+        str(prefix).strip().lower()
+        for prefix in sft_cfg.get("exclude_source_prefixes", [])
+        if str(prefix).strip()
+    ]
     enable_sdc_bundle_generation = bool(sft_cfg.get("enable_sdc_bundle_generation", True))
 
     generator = InstructionGenerator(logger, config=sft_cfg)
@@ -526,6 +533,9 @@ def run_sft_generation_stage(config: dict, logger: PipelineLogger, root: Path):
                 continue
 
             rel_path = str(clean_path.relative_to(clean_dir))
+            rel_path_lower = rel_path.lower()
+            if any(rel_path_lower.startswith(prefix) for prefix in exclude_source_prefixes):
+                continue
             try:
                 with open(clean_path, "r", encoding="utf-8") as handle:
                     content = handle.read()

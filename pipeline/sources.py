@@ -487,6 +487,11 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
     require_core_constraint = str(filter_cfg.get("require_drupal_core_constraint", "^11"))
     require_php_min = str(filter_cfg.get("require_php_constraint_min", "8.3"))
     exclude_archived = bool(filter_cfg.get("exclude_archived_or_security_only", True))
+    excluded_machine_names = {
+        str(name).strip().lower()
+        for name in filter_cfg.get("exclude_project_machine_names", [])
+        if str(name).strip()
+    }
 
     candidates: list[dict[str, Any]] = []
 
@@ -494,6 +499,9 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
         machine_name = _extract_machine_name(project)
         if not machine_name:
             rejection_reasons["missing_machine_name"] = rejection_reasons.get("missing_machine_name", 0) + 1
+            continue
+        if machine_name.lower() in excluded_machine_names:
+            rejection_reasons["excluded_machine_name"] = rejection_reasons.get("excluded_machine_name", 0) + 1
             continue
 
         if exclude_archived and _looks_archived_or_security_only(project):

@@ -28,10 +28,31 @@ DEFAULT_WEAK_CATEGORY_PATTERNS: dict[str, list[str]] = {
         r"public\s+static\s+function\s+create\s*\(",
         r"services\.yml",
         r"logger\.factory",
+        r"__construct\s*\(",
     ],
     "routing": [r"routing\.yml", r"\broute_name\b", r"\b_controller\b", r"\bpath:\s*['\"/]"],
     "sdc": [r"single\s+directory\s+component", r"component\.yml", r"\.component\.yml", r"\bsdc\b"],
+    "twig": [r"\.twig\b", r"\{\{", r"\{%", r"component\.yml", r"\.component\.yml", r"single\s+directory\s+component"],
 }
+DEFAULT_MODERN_DRUPAL_REQUIRED_CATEGORIES = ("attributes", "di")
+DEFAULT_MODERN_DRUPAL_RELEVANT_TYPES = (
+    "code_reference",
+    "sdc_reference",
+    "bugfix",
+    "refactor",
+    "write_from_spec",
+    "explain_and_implement",
+)
+DEFAULT_MODERN_DRUPAL_SOURCE_PATTERNS = ("/plugin/", ".module", ".install", ".theme", ".services.yml")
+DEFAULT_MODERN_DRUPAL_INSTRUCTION_TERMS = (
+    "plugin",
+    "module",
+    "block",
+    "service",
+    "dependency injection",
+    "constructor injection",
+    "containerinterface",
+)
 SOURCE_FILE_PLACEHOLDER = "<source_file>"
 WHITESPACE_RE = re.compile(r"\s+")
 
@@ -325,7 +346,15 @@ def _detect_symbol_kind_and_name(sample: dict[str, Any]) -> tuple[str, str]:
 
 
 def _validate_sample(
-    sample: dict[str, Any], require_context_for_types: set[str] | None = None
+    sample: dict[str, Any],
+    require_context_for_types: set[str] | None = None,
+    *,
+    enforce_modern_drupal_patterns: bool = False,
+    modern_drupal_required_categories: set[str] | None = None,
+    modern_drupal_relevant_types: set[str] | None = None,
+    modern_drupal_source_patterns: list[str] | None = None,
+    modern_drupal_instruction_terms: list[str] | None = None,
+    category_patterns: dict[str, list[Pattern[str]]] | None = None,
 ) -> tuple[bool, str]:
     instruction = str(sample.get("instruction", "")).strip()
     input_text = str(sample.get("input", "")).strip()
@@ -382,6 +411,29 @@ def _validate_sample(
         return False, "truncation_artifact"
     if stripped.endswith(("Input:", "Output:", "Instruction:")):
         return False, "truncation_artifact"
+
+    if enforce_modern_drupal_patterns:
+        sample_type = str(sample.get("metadata", {}).get("type", "")).strip() or _sample_type(sample)
+        relevant_types = modern_drupal_relevant_types or set(DEFAULT_MODERN_DRUPAL_RELEVANT_TYPES)
+        source_patterns = modern_drupal_source_patterns or list(DEFAULT_MODERN_DRUPAL_SOURCE_PATTERNS)
+        instruction_terms = modern_drupal_instruction_terms or list(DEFAULT_MODERN_DRUPAL_INSTRUCTION_TERMS)
+        source_lower = source.lower()
+        is_php_like = _is_php_output(sample) or _is_source_php_file(sample)
+        if not is_php_like:
+            return True, ""
+        is_relevant = (
+            sample_type in relevant_types
+            or any(token in source_lower for token in source_patterns)
+            or any(term in instruction_lower for term in instruction_terms)
+        )
+        required_categories = modern_drupal_required_categories or set(DEFAULT_MODERN_DRUPAL_REQUIRED_CATEGORIES)
+        if is_relevant and required_categories:
+            matched = any(
+                _sample_matches_category(sample, category, category_patterns=category_patterns or {})
+                for category in required_categories
+            )
+            if not matched:
+                return False, "missing_drupal11_attribute_or_di_pattern"
 
     return True, ""
 
@@ -852,8 +904,14 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
             "attributes": 600,
             "di": 600,
             "sdc": 400,
+            "twig": 400,
         },
         "weak_category_patterns": DEFAULT_WEAK_CATEGORY_PATTERNS,
+        "enforce_modern_drupal_patterns": False,
+        "modern_drupal_required_categories": list(DEFAULT_MODERN_DRUPAL_REQUIRED_CATEGORIES),
+        "modern_drupal_relevant_types": list(DEFAULT_MODERN_DRUPAL_RELEVANT_TYPES),
+        "modern_drupal_relevant_source_patterns": list(DEFAULT_MODERN_DRUPAL_SOURCE_PATTERNS),
+        "modern_drupal_relevant_instruction_terms": list(DEFAULT_MODERN_DRUPAL_INSTRUCTION_TERMS),
         "chunk_overlap_lines": 30,
         "target_test_ratio": 0.15,
         "exclude_test_sources_from_training_pool": True,
@@ -926,12 +984,42 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         if str(sample_type).strip()
     }
     category_patterns = _compile_category_patterns(refine_cfg.get("weak_category_patterns", {}))
+    enforce_modern_drupal_patterns = bool(refine_cfg.get("enforce_modern_drupal_patterns", False))
+    modern_drupal_required_categories = {
+        str(category).strip()
+        for category in refine_cfg.get("modern_drupal_required_categories", DEFAULT_MODERN_DRUPAL_REQUIRED_CATEGORIES)
+        if str(category).strip()
+    }
+    modern_drupal_relevant_types = {
+        str(sample_type).strip()
+        for sample_type in refine_cfg.get("modern_drupal_relevant_types", DEFAULT_MODERN_DRUPAL_RELEVANT_TYPES)
+        if str(sample_type).strip()
+    }
+    modern_drupal_source_patterns = [
+        str(pattern).strip().lower()
+        for pattern in refine_cfg.get("modern_drupal_relevant_source_patterns", DEFAULT_MODERN_DRUPAL_SOURCE_PATTERNS)
+        if str(pattern).strip()
+    ]
+    modern_drupal_instruction_terms = [
+        str(term).strip().lower()
+        for term in refine_cfg.get("modern_drupal_relevant_instruction_terms", DEFAULT_MODERN_DRUPAL_INSTRUCTION_TERMS)
+        if str(term).strip()
+    ]
 
     filtered_records: list[dict[str, Any]] = []
     rejected_records: list[dict[str, Any]] = []
     rejection_reasons: dict[str, int] = {}
     for sample in records:
-        passed, reason = _validate_sample(sample, require_context_for_types=require_context_for_types)
+        passed, reason = _validate_sample(
+            sample,
+            require_context_for_types=require_context_for_types,
+            enforce_modern_drupal_patterns=enforce_modern_drupal_patterns,
+            modern_drupal_required_categories=modern_drupal_required_categories,
+            modern_drupal_relevant_types=modern_drupal_relevant_types,
+            modern_drupal_source_patterns=modern_drupal_source_patterns,
+            modern_drupal_instruction_terms=modern_drupal_instruction_terms,
+            category_patterns=category_patterns,
+        )
         if passed:
             _ensure_sample_type(sample, default="retrieval")
             filtered_records.append(sample)

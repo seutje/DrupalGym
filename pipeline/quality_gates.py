@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Pattern
 
 from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
@@ -26,6 +27,36 @@ ROOT_PROCEDURAL_PHP = {
     "cron.php",
     "rebuild.php",
 }
+DEFAULT_WEAK_CATEGORY_PATTERNS: dict[str, list[str]] = {
+    "attributes": [r"#\[[A-Za-z_\\][A-Za-z0-9_\\]*"],
+    "di": [
+        r"\bContainerInterface\b",
+        r"public\s+static\s+function\s+create\s*\(",
+        r"services\.yml",
+        r"logger\.factory",
+        r"__construct\s*\(",
+    ],
+}
+DEFAULT_MODERN_DRUPAL_REQUIRED_CATEGORIES = ("attributes", "di")
+DEFAULT_MODERN_DRUPAL_RELEVANT_TYPES = (
+    "code_reference",
+    "sdc_reference",
+    "bugfix",
+    "refactor",
+    "write_from_spec",
+    "explain_and_implement",
+)
+DEFAULT_MODERN_DRUPAL_SOURCE_PATTERNS = ("/plugin/", ".module", ".install", ".theme", ".services.yml")
+DEFAULT_MODERN_DRUPAL_INSTRUCTION_TERMS = (
+    "plugin",
+    "module",
+    "block",
+    "service",
+    "dependency injection",
+    "constructor injection",
+    "containerinterface",
+)
+PHPSTAN_SYNTAX_ERROR_RE = re.compile(r"(syntax error|parse error)", re.IGNORECASE)
 
 
 def _percentile(values: list[int], p: float) -> int:
@@ -34,6 +65,21 @@ def _percentile(values: list[int], p: float) -> int:
     ordered = sorted(values)
     idx = int((len(ordered) - 1) * p)
     return ordered[max(0, min(len(ordered) - 1, idx))]
+
+
+def _compile_pattern_map(configured: dict | None) -> dict[str, list[Pattern[str]]]:
+    source = configured or DEFAULT_WEAK_CATEGORY_PATTERNS
+    compiled: dict[str, list[Pattern[str]]] = {}
+    for category, values in source.items():
+        patterns: list[Pattern[str]] = []
+        for raw in values:
+            try:
+                patterns.append(re.compile(str(raw), re.IGNORECASE | re.MULTILINE))
+            except re.error:
+                continue
+        if patterns:
+            compiled[str(category)] = patterns
+    return compiled
 
 
 class QualityGate:
@@ -52,6 +98,14 @@ class QualityGate:
         }
         self.run_php_lint = bool(cfg.get("run_php_lint", False))
         self.php_bin = shutil.which("php") if self.run_php_lint else None
+        self.run_phpcs = bool(cfg.get("run_phpcs", False))
+        self.phpcs_bin = shutil.which("phpcs") if self.run_phpcs else None
+        self.phpcs_drupal_standard_available = self._has_drupal_phpcs_standard() if self.phpcs_bin else False
+        self.run_phpstan = bool(cfg.get("run_phpstan", False))
+        self.phpstan_bin = shutil.which("phpstan") if self.run_phpstan else None
+        self.phpstan_failure_mode = str(cfg.get("phpstan_failure_mode", "syntax_only")).strip().lower()
+        if self.phpstan_failure_mode not in {"syntax_only", "strict"}:
+            self.phpstan_failure_mode = "syntax_only"
         self.reject_prompt_wrapper_echo = bool(cfg.get("reject_prompt_wrapper_echo", True))
         self.reject_path_leakage_tokens = bool(cfg.get("reject_path_leakage_tokens", True))
         self.path_leakage_tokens = [str(token).lower() for token in cfg.get("path_leakage_tokens", ["repos/"])]
@@ -77,6 +131,28 @@ class QualityGate:
             for term in cfg.get("doc_topic_denylist_terms", [])
             if str(term).strip()
         ]
+        self.enforce_modern_drupal_patterns = bool(cfg.get("enforce_modern_drupal_patterns", False))
+        self.modern_drupal_required_categories = {
+            str(category).strip()
+            for category in cfg.get("modern_drupal_required_categories", DEFAULT_MODERN_DRUPAL_REQUIRED_CATEGORIES)
+            if str(category).strip()
+        }
+        self.modern_drupal_relevant_types = {
+            str(sample_type).strip()
+            for sample_type in cfg.get("modern_drupal_relevant_types", DEFAULT_MODERN_DRUPAL_RELEVANT_TYPES)
+            if str(sample_type).strip()
+        }
+        self.modern_drupal_source_patterns = [
+            str(pattern).strip().lower()
+            for pattern in cfg.get("modern_drupal_relevant_source_patterns", DEFAULT_MODERN_DRUPAL_SOURCE_PATTERNS)
+            if str(pattern).strip()
+        ]
+        self.modern_drupal_instruction_terms = [
+            str(term).strip().lower()
+            for term in cfg.get("modern_drupal_relevant_instruction_terms", DEFAULT_MODERN_DRUPAL_INSTRUCTION_TERMS)
+            if str(term).strip()
+        ]
+        self.weak_category_patterns = _compile_pattern_map(cfg.get("weak_category_patterns"))
 
         self.rejected_count = 0
         self.passed_count = 0
@@ -153,16 +229,33 @@ class QualityGate:
         source_lower = source.lower()
         return any(source_lower.startswith(prefix) for prefix in self.doc_source_allowlist_prefixes)
 
+    @staticmethod
+    def _with_php_tag(output: str) -> str:
+        return output if output.lstrip().startswith("<?php") else f"<?php\n{output}"
+
+    @staticmethod
+    def _phpcs_temp_filename_from_source(source: str) -> str:
+        raw_name = Path(str(source or "").strip()).name
+        if not raw_name:
+            return "sample.php"
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", raw_name)
+        if not safe_name or safe_name in {".", ".."}:
+            return "sample.php"
+        return safe_name
+
+    def _write_temp_php(self, output: str) -> str:
+        content = self._with_php_tag(output)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".php", delete=False, encoding="utf-8") as handle:
+            handle.write(content)
+            return handle.name
+
     def _php_lint_ok(self, output: str) -> bool:
         if not self.run_php_lint or not self.php_bin:
             return True
         if "<?php" not in output:
             return True
 
-        content = output if output.lstrip().startswith("<?php") else f"<?php\n{output}"
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".php", delete=False, encoding="utf-8") as handle:
-            handle.write(content)
-            temp_path = handle.name
+        temp_path = self._write_temp_php(output)
 
         try:
             proc = subprocess.run(
@@ -174,6 +267,127 @@ class QualityGate:
             return proc.returncode == 0
         finally:
             Path(temp_path).unlink(missing_ok=True)
+
+    def _has_drupal_phpcs_standard(self) -> bool:
+        if not self.phpcs_bin:
+            return False
+        proc = subprocess.run([self.phpcs_bin, "-i"], check=False, capture_output=True, text=True)
+        output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        return "Drupal" in output
+
+    def _phpcs_ok(self, output: str, source: str) -> bool:
+        if not self.run_phpcs or not self.phpcs_bin or not self.phpcs_drupal_standard_available:
+            return True
+        if "<?php" not in output:
+            return True
+
+        content = self._with_php_tag(output)
+        file_name = self._phpcs_temp_filename_from_source(source)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = str(Path(temp_dir) / file_name)
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                handle.write(content)
+            proc = subprocess.run(
+                [self.phpcs_bin, "--standard=Drupal", temp_path],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode == 0
+
+    @staticmethod
+    def _extract_phpstan_messages(stdout: str, stderr: str) -> list[str]:
+        messages: list[str] = []
+        payload = (stdout or "").strip()
+        if payload:
+            try:
+                data = json.loads(payload)
+                for value in data.get("errors", []):
+                    text = str(value).strip()
+                    if text:
+                        messages.append(text)
+                for file_info in data.get("files", {}).values():
+                    for item in file_info.get("messages", []):
+                        text = str(item.get("message", "")).strip()
+                        if text:
+                            messages.append(text)
+            except json.JSONDecodeError:
+                for line in payload.splitlines():
+                    text = line.strip()
+                    if text:
+                        messages.append(text)
+        if not messages:
+            for line in (stderr or "").splitlines():
+                text = line.strip()
+                if text:
+                    messages.append(text)
+        return messages
+
+    def _phpstan_ok(self, output: str) -> bool:
+        if not self.run_phpstan or not self.phpstan_bin:
+            return True
+        if "<?php" not in output:
+            return True
+
+        temp_path = self._write_temp_php(output)
+        try:
+            proc = subprocess.run(
+                [
+                    self.phpstan_bin,
+                    "analyse",
+                    "--no-progress",
+                    "--error-format=json",
+                    "--level=0",
+                    temp_path,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+        if proc.returncode == 0:
+            return True
+
+        messages = self._extract_phpstan_messages(proc.stdout, proc.stderr)
+        syntax_errors = sum(1 for message in messages if PHPSTAN_SYNTAX_ERROR_RE.search(message))
+        if self.phpstan_failure_mode == "syntax_only":
+            return syntax_errors == 0
+        return False
+
+    def _sample_requires_modern_patterns(
+        self, sample_type: str, source: str, instruction_lower: str, output_lower: str
+    ) -> bool:
+        source_lower = source.lower()
+        is_php_like = (
+            "<?php" in output_lower
+            or source_lower.endswith((".php", ".module", ".install", ".inc", ".theme", ".profile"))
+        )
+        if not is_php_like:
+            return False
+        if sample_type in self.modern_drupal_relevant_types:
+            return True
+        if any(token in source_lower for token in self.modern_drupal_source_patterns):
+            return True
+        return any(term in instruction_lower for term in self.modern_drupal_instruction_terms)
+
+    def _has_required_modern_pattern(self, sample: dict) -> bool:
+        patterns: list[Pattern[str]] = []
+        for category in self.modern_drupal_required_categories:
+            patterns.extend(self.weak_category_patterns.get(category, []))
+        if not patterns:
+            return True
+
+        blob = "\n".join(
+            [
+                str(sample.get("metadata", {}).get("source", "")),
+                str(sample.get("instruction", "")),
+                str(sample.get("input", "")),
+                str(sample.get("output", "")),
+            ]
+        )
+        return any(pattern.search(blob) for pattern in patterns)
 
     def check_sample(self, sample: dict) -> tuple[bool, str]:
         output = sample.get("output", "")
@@ -206,10 +420,20 @@ class QualityGate:
             if alpha_char_count < 80:
                 return False, "doc_instruction_output_mismatch"
             topic = str(sample.get("metadata", {}).get("topic", "")).strip().lower()
-            if any(term in topic for term in self.doc_topic_denylist_terms):
+            doc_blob = "\n".join([topic, instruction_lower, output.lower()])
+            if any(term in doc_blob for term in self.doc_topic_denylist_terms):
                 return False, "doc_topic_denied"
             if not self._doc_source_allowed(source):
                 return False, "doc_source_not_allowed"
+
+        if self.enforce_modern_drupal_patterns and self._sample_requires_modern_patterns(
+            sample_type=sample_type,
+            source=source,
+            instruction_lower=instruction_lower,
+            output_lower=output.lower(),
+        ):
+            if not self._has_required_modern_pattern(sample):
+                return False, "missing_drupal11_attribute_or_di_pattern"
 
         if len(output) < self._effective_min_chars(sample_type):
             return False, "too_short"
@@ -295,6 +519,10 @@ class QualityGate:
 
         if not self._php_lint_ok(output):
             return False, "php_syntax_error"
+        if not self._phpcs_ok(output, source=source):
+            return False, "phpcs_drupal_violation"
+        if not self._phpstan_ok(output):
+            return False, "phpstan_failure"
 
         self.seen_output_hashes.add(output_hash)
         pair_outputs = self.instruction_input_outputs.setdefault(pair_key, set())

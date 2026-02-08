@@ -20,6 +20,88 @@ Python 3.10+ is recommended. You also need `git` available on PATH for acquisiti
 
 For training (stage 7), a CUDA-capable GPU is required. The current training run is a short test run tuned for consumer GPUs; it will fail fast if CUDA is not available.
 
+## PHP Tooling Prerequisites (Stage 5/8/9 Gates)
+Quality and evaluation stages can run PHP checks, and full-scale training now gates on required tool availability. Install `php`, `phpcs`, and `phpstan` globally so they are discoverable on PATH.
+
+### Ubuntu/Debian
+1. Install base packages:
+```bash
+sudo apt-get update
+sudo apt-get install -y php-cli php-xml composer unzip
+```
+
+2. Install global tools:
+```bash
+composer global require drupal/coder phpstan/phpstan
+```
+
+3. Add Composer global bin paths:
+```bash
+export PATH="$HOME/.config/composer/vendor/bin:$HOME/.composer/vendor/bin:$PATH"
+```
+Persist this in your shell profile (for example `~/.bashrc` or `~/.zshrc`).
+
+4. Register the Drupal coding standard in PHPCS:
+```bash
+phpcs --config-set installed_paths "$HOME/.config/composer/vendor/drupal/coder/coder_sniffer"
+```
+If that path does not exist, use:
+```bash
+phpcs --config-set installed_paths "$HOME/.composer/vendor/drupal/coder/coder_sniffer"
+```
+
+5. Verify:
+```bash
+php -v
+phpcs --version
+phpstan --version
+phpcs -i
+```
+`phpcs -i` must include `Drupal`.
+
+### macOS (Homebrew)
+1. Install base packages:
+```bash
+brew install php composer
+```
+
+2. Install global tools:
+```bash
+composer global require drupal/coder phpstan/phpstan
+```
+
+3. Add Composer global bin paths:
+```bash
+export PATH="$HOME/.config/composer/vendor/bin:$HOME/.composer/vendor/bin:$PATH"
+```
+Persist this in `~/.zshrc` or `~/.bashrc` depending on your shell.
+
+4. Register Drupal coding standard:
+```bash
+phpcs --config-set installed_paths "$HOME/.config/composer/vendor/drupal/coder/coder_sniffer"
+```
+Fallback:
+```bash
+phpcs --config-set installed_paths "$HOME/.composer/vendor/drupal/coder/coder_sniffer"
+```
+
+5. Verify:
+```bash
+php -v
+phpcs --version
+phpstan --version
+phpcs -i
+```
+
+### Troubleshooting
+- If `phpcs -i` does not list `Drupal`, rerun `phpcs --config-set installed_paths ...` with the correct Composer path.
+- If `php`, `phpcs`, or `phpstan` are not found, reload your shell and re-check:
+```bash
+command -v php
+command -v phpcs
+command -v phpstan
+```
+
 ## Configuration
 Pipeline behavior is controlled by `pipeline.yaml`. Key knobs include:
 `sources` (Drupal.org API discovery + curated sources), `dataset.targets` (train/valid/test split), `seed`, and the `models` list.
@@ -221,6 +303,8 @@ bash scripts/runpod_setup.sh
 # Enter the virtual environment
 source venv/bin/activate
 ```
+
+`scripts/runpod_setup.sh` now also installs `php`, `phpcs`, `phpstan`, and configures PHPCS with the Drupal coding standard.
 
 ### 3. Running Full-Scale Training on L40S
 The `pipeline.yaml` is configured with L40S-friendly `full_scale` settings for `Qwen2.5-Coder-7B`:

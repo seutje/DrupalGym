@@ -329,6 +329,57 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         self.assertFalse(passed)
         self.assertEqual(reason, "missing_context_input")
 
+    def test_validate_modern_drupal_pattern_requirement(self):
+        sample = {
+            "instruction": "Show me the implementation of the class GymStatsBlock in the file <source_file>.",
+            "input": "Source file: <source_file>",
+            "output": "<?php\nnamespace Drupal\\gym\\Plugin\\Block;\nclass GymStatsBlock {}\n",
+            "metadata": {
+                "source": "repos/example/src/Plugin/Block/GymStatsBlock.php",
+                "type": "code_reference",
+            },
+        }
+        patterns = _compile_category_patterns(
+            {
+                "attributes": [r"#\[[A-Za-z_\\][A-Za-z0-9_\\]*"],
+                "di": [r"__construct\s*\("],
+            }
+        )
+        passed, reason = _validate_sample(
+            sample,
+            enforce_modern_drupal_patterns=True,
+            modern_drupal_required_categories={"attributes", "di"},
+            modern_drupal_source_patterns=["/plugin/"],
+            category_patterns=patterns,
+        )
+        self.assertFalse(passed)
+        self.assertEqual(reason, "missing_drupal11_attribute_or_di_pattern")
+
+    def test_validate_modern_drupal_pattern_skips_non_php_twig(self):
+        sample = {
+            "instruction": "Show the Twig template implementation in <source_file> for Drupal 11 theming.",
+            "input": "Source file: <source_file>",
+            "output": "{% if title %}<h2>{{ title }}</h2>{% endif %}\n",
+            "metadata": {
+                "source": "docs/www_drupal_org/docs/develop/theming-drupal/single-directory-components/card.twig",
+                "type": "twig_reference",
+            },
+        }
+        patterns = _compile_category_patterns(
+            {
+                "attributes": [r"#\[[A-Za-z_\\][A-Za-z0-9_\\]*"],
+                "di": [r"__construct\s*\("],
+            }
+        )
+        passed, reason = _validate_sample(
+            sample,
+            enforce_modern_drupal_patterns=True,
+            modern_drupal_required_categories={"attributes", "di"},
+            category_patterns=patterns,
+        )
+        self.assertTrue(passed)
+        self.assertEqual(reason, "")
+
     def test_char_chunk_sample_splits_long_char_output(self):
         long_line = "x" * 2500
         sample = {

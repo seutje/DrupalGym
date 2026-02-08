@@ -248,6 +248,95 @@ class QualityGateHelpersTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "doc_source_not_allowed")
 
+    def test_modern_drupal_pattern_enforcement_for_plugin_samples(self):
+        gate = QualityGate(
+            _DummyLogger(),
+            config={
+                "run_php_lint": False,
+                "min_output_chars": 10,
+                "max_output_chars": 5000,
+                "reject_path_leakage_tokens": False,
+                "enforce_modern_drupal_patterns": True,
+                "modern_drupal_required_categories": ["attributes", "di"],
+                "modern_drupal_relevant_source_patterns": ["/plugin/"],
+                "weak_category_patterns": {
+                    "attributes": [r"#\[[A-Za-z_\\][A-Za-z0-9_\\]*"],
+                    "di": [r"__construct\s*\("],
+                },
+            },
+        )
+        rejected = {
+            "instruction": "Show me the implementation of the class GymStatsBlock in the file <source_file>.",
+            "input": "Source file: <source_file>",
+            "output": "<?php\nnamespace Drupal\\gym\\Plugin\\Block;\nclass GymStatsBlock {}\n",
+            "metadata": {
+                "source": "repos/example/src/Plugin/Block/GymStatsBlock.php",
+                "type": "code_reference",
+            },
+        }
+        ok, reason = gate.check_sample(rejected)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "missing_drupal11_attribute_or_di_pattern")
+
+        accepted = {
+            "instruction": "Show me the implementation of the class GymStatsBlock in the file <source_file>.",
+            "input": "Source file: <source_file>",
+            "output": (
+                "<?php\n"
+                "namespace Drupal\\gym\\Plugin\\Block;\n"
+                "#[Block(id: 'gym_stats', admin_label: 'Gym Statistics')]\n"
+                "class GymStatsBlock {\n"
+                "  public function __construct() {}\n"
+                "}\n"
+            ),
+            "metadata": {
+                "source": "repos/example/src/Plugin/Block/GymStatsBlock.php",
+                "type": "code_reference",
+            },
+        }
+        ok, reason = gate.check_sample(accepted)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+    def test_modern_pattern_enforcement_skips_non_php_sdc_samples(self):
+        gate = QualityGate(
+            _DummyLogger(),
+            config={
+                "run_php_lint": False,
+                "min_output_chars": 10,
+                "max_output_chars": 5000,
+                "reject_path_leakage_tokens": False,
+                "enforce_modern_drupal_patterns": True,
+                "modern_drupal_required_categories": ["attributes", "di"],
+            },
+        )
+        sample = {
+            "instruction": "Show a Drupal 11 Single Directory Component example with directory structure and component.yml.",
+            "input": "Source file: <source_file>",
+            "output": "component.yml\nname: card\nprops:\n  title:\n    type: string\n\ncard.twig\n<article>{{ title }}</article>\n",
+            "metadata": {
+                "source": "docs/www_drupal_org/docs/develop/theming-drupal/single-directory-components/card.md",
+                "type": "sdc_reference",
+            },
+        }
+        ok, reason = gate.check_sample(sample)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
+
+    def test_phpcs_temp_filename_preserves_source_basename(self):
+        self.assertEqual(
+            QualityGate._phpcs_temp_filename_from_source("repos/drupal_core/core/lib/Drupal/Core/FooBar.php"),
+            "FooBar.php",
+        )
+        self.assertEqual(
+            QualityGate._phpcs_temp_filename_from_source(""),
+            "sample.php",
+        )
+        self.assertEqual(
+            QualityGate._phpcs_temp_filename_from_source("../../weird name?.php"),
+            "weird_name_.php",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import shutil
 import torch
 from typing import Any
 
@@ -236,6 +237,31 @@ def _load_quality_scorecard(dataset_dir: Path, logger: PipelineLogger) -> dict[s
     logger.info("Quality scorecard gate passed.", scorecard_path=str(scorecard_path))
     return scorecard
 
+
+def _count_jsonl_records(path: Path) -> int:
+    count = 0
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
+    return count
+
+
+def _missing_quality_tools(config: dict) -> list[str]:
+    required: set[str] = set()
+    quality_cfg = config.get("quality", {})
+    evaluation_cfg = config.get("evaluation", {})
+
+    if bool(quality_cfg.get("run_php_lint", False)) or bool(evaluation_cfg.get("run_php_lint", False)):
+        required.add("php")
+    if bool(quality_cfg.get("run_phpcs", False)) or bool(evaluation_cfg.get("run_phpcs", False)):
+        required.add("phpcs")
+    if bool(quality_cfg.get("run_phpstan", False)) or bool(evaluation_cfg.get("run_phpstan", False)):
+        required.add("phpstan")
+
+    missing = [tool for tool in sorted(required) if shutil.which(tool) is None]
+    return missing
+
 def train_model(
     model_config: dict,
     dataset_dir: Path,
@@ -397,6 +423,35 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
         return 1
     if _load_quality_scorecard(dataset_dir, logger) is None:
         return 1
+    if mode in {"full_scale", "final"}:
+        full_scale_cfg = config.get("training", {}).get("full_scale", {})
+        train_path = dataset_dir / "train.jsonl"
+        min_train_samples = int(full_scale_cfg.get("min_train_samples", 8000))
+        preferred_train_samples = int(full_scale_cfg.get("preferred_train_samples", 20000))
+        train_samples = _count_jsonl_records(train_path)
+        if train_samples < min_train_samples:
+            logger.error(
+                "Train split is below full-scale minimum threshold.",
+                train_samples=train_samples,
+                min_train_samples=min_train_samples,
+            )
+            return 1
+        if train_samples < preferred_train_samples:
+            logger.info(
+                "Train split meets minimum threshold but is below preferred full-scale size.",
+                train_samples=train_samples,
+                preferred_train_samples=preferred_train_samples,
+            )
+
+        require_quality_tooling = bool(full_scale_cfg.get("require_quality_tooling", True))
+        if require_quality_tooling:
+            missing_tools = _missing_quality_tools(config)
+            if missing_tools:
+                logger.error(
+                    "Required quality tools are unavailable for full-scale training.",
+                    missing_tools=missing_tools,
+                )
+                return 1
     models_dir = root / "models"
     
     default_cfg = {

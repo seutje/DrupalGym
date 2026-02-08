@@ -38,14 +38,28 @@ sources:
     require_drupal_core_constraint: "^11"
     require_php_constraint_min: "8.3"
     exclude_archived_or_security_only: true
+    exclude_project_machine_names:
+      - "mcp_tools"
 
 acquisition:
+  exclude_source_ids:
+    - "mcp_tools"
   docs:
     max_pages_per_source: 300
+    url_denylist_terms:
+      - "drupal-8"
+      - "drupal-9"
+      - "/8.x/"
+      - "/9.x/"
+      - "annotation"
+      - "%40block"
     allowed_prefixes:
       drupal_docs:
         - "https://www.drupal.org/docs"
         - "https://www.drupal.org/docs/develop"
+        - "https://www.drupal.org/docs/develop/theming-drupal"
+        - "https://www.drupal.org/docs/develop/theming-drupal/single-directory-components"
+        - "https://www.drupal.org/docs/develop/theming"
       drupal_api:
         - "https://api.drupal.org/api/drupal"
       symfony_docs:
@@ -65,8 +79,13 @@ sft_generation:
   enable_sdc_bundle_generation: true
   sdc_bundle_variants: 4
   include_extensions: [".php", ".module", ".inc", ".install", ".theme", ".yml", ".twig", ".md"]
+  exclude_source_prefixes:
+    - "repos/mcp_tools/"
   doc_source_allowlist_prefixes:
     - "docs/www_drupal_org/"
+    - "docs/www_drupal_org/docs/develop/theming/"
+    - "docs/www_drupal_org/docs/develop/theming-drupal/"
+    - "docs/www_drupal_org/docs/develop/theming-drupal/single-directory-components/"
     - "docs/api_drupal_org/"
     - "repos/drupal_core/"
   doc_topic_denylist_terms:
@@ -74,14 +93,47 @@ sft_generation:
     - "apidog"
     - "gitlab duo"
     - "workflow automation"
+    - "drupal 8"
+    - "drupal 9"
+    - "annotation"
+    - "@block"
   doc_max_output_chars: 6000
 
 quality:
   run_php_lint: true
+  run_phpcs: true
+  run_phpstan: true
+  phpstan_failure_mode: "syntax_only"
   min_output_chars: 220
   max_output_chars: 30000
   reject_path_leakage_tokens: true
   path_leakage_tokens: ["repos/"]
+  enforce_modern_drupal_patterns: true
+  modern_drupal_required_categories: ["attributes", "di"]
+  modern_drupal_relevant_types: ["code_reference", "bugfix", "refactor", "write_from_spec", "explain_and_implement"]
+  modern_drupal_relevant_source_patterns:
+    - "/plugin/"
+    - ".module"
+    - ".install"
+    - ".theme"
+    - ".services.yml"
+  modern_drupal_relevant_instruction_terms:
+    - "plugin"
+    - "module"
+    - "block"
+    - "service"
+    - "dependency injection"
+    - "constructor injection"
+    - "containerinterface"
+  weak_category_patterns:
+    attributes:
+      - "#\\[[A-Za-z_\\\\][A-Za-z0-9_\\\\]*"
+    di:
+      - "\\bContainerInterface\\b"
+      - "public\\s+static\\s+function\\s+create\\s*\\("
+      - "services\\.yml"
+      - "logger\\.factory"
+      - "__construct\\s*\\("
   min_output_chars_by_type:
     code_reference: 220
     yaml_reference: 10
@@ -105,6 +157,9 @@ quality:
     - "sdc_reference"
   doc_source_allowlist_prefixes:
     - "docs/www_drupal_org/"
+    - "docs/www_drupal_org/docs/develop/theming/"
+    - "docs/www_drupal_org/docs/develop/theming-drupal/"
+    - "docs/www_drupal_org/docs/develop/theming-drupal/single-directory-components/"
     - "docs/api_drupal_org/"
     - "repos/drupal_core/"
   doc_topic_denylist_terms:
@@ -112,6 +167,10 @@ quality:
     - "apidog"
     - "gitlab duo"
     - "workflow automation"
+    - "drupal 8"
+    - "drupal 9"
+    - "annotation"
+    - "@block"
 
 dataset:
   training_version: "v2"
@@ -127,7 +186,7 @@ dataset_refinement:
   seed: 42
   max_output_lines: 300
   max_output_chars: 6000
-  max_source_share: 0.55
+  max_source_share: 0.90
   deduplicate_normalized_output: true
   duplicate_resolution: "prefer_augmented_drop_retrieval"
   require_context_for_types:
@@ -140,6 +199,24 @@ dataset_refinement:
     attributes: 600
     di: 600
     sdc: 400
+    twig: 450
+  enforce_modern_drupal_patterns: true
+  modern_drupal_required_categories: ["attributes", "di"]
+  modern_drupal_relevant_types: ["code_reference", "bugfix", "refactor", "write_from_spec", "explain_and_implement"]
+  modern_drupal_relevant_source_patterns:
+    - "/plugin/"
+    - ".module"
+    - ".install"
+    - ".theme"
+    - ".services.yml"
+  modern_drupal_relevant_instruction_terms:
+    - "plugin"
+    - "module"
+    - "block"
+    - "service"
+    - "dependency injection"
+    - "constructor injection"
+    - "containerinterface"
   weak_category_patterns:
     attributes:
       - "#\\[[A-Za-z_\\\\][A-Za-z0-9_\\\\]*"
@@ -158,11 +235,19 @@ dataset_refinement:
       - "component\\.yml"
       - "\\.component\\.yml"
       - "\\bsdc\\b"
+    twig:
+      - "\\.twig\\b"
+      - "\\{\\{"
+      - "\\{%"
+      - "component\\.yml"
+      - "\\.component\\.yml"
+      - "single\\s+directory\\s+component"
   chunk_overlap_lines: 30
-  target_test_ratio: 0.15
-  exclude_test_sources_from_training_pool: true
+  target_test_ratio: 0.55
+  exclude_test_sources_from_training_pool: false
   exclude_sources_prefixes:
     - "docs/symfony_com/"
+    - "repos/mcp_tools/"
   augmentation:
     enabled: true
     ratio: 0.75
@@ -202,6 +287,9 @@ training:
         base_model: "Qwen/Qwen2.5-Coder-3B"
         training_type: "QLoRA"
   full_scale:
+    min_train_samples: 8000
+    preferred_train_samples: 20000
+    require_quality_tooling: true
     max_seq_len: 2048
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
@@ -240,7 +328,9 @@ evaluation:
   device: "auto"
   max_models: 1
   run_php_lint: true
-  run_phpcs: false
+  run_phpcs: true
+  run_phpstan: true
+  phpstan_failure_mode: "syntax_only"
   max_code_checks_per_response: 3
   repetition_penalty: 1.1
   no_repeat_ngram_size: 4

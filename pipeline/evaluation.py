@@ -39,6 +39,7 @@ DEFAULT_PROMPT_SUITE = [
 ]
 PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
+PHPSTAN_SYNTAX_ERROR_RE = re.compile(r"(syntax error|parse error)", re.IGNORECASE)
 
 
 def _iso_timestamp() -> str:
@@ -59,6 +60,8 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
         "max_models": 1,
         "run_php_lint": True,
         "run_phpcs": False,
+        "run_phpstan": False,
+        "phpstan_failure_mode": "syntax_only",
         "max_code_checks_per_response": 3,
         "repetition_penalty": 1.0,
         "no_repeat_ngram_size": 0,
@@ -321,6 +324,89 @@ def _run_phpcs(snippets: list[str]) -> dict[str, Any]:
     return summary
 
 
+def _extract_phpstan_messages(stdout: str, stderr: str) -> list[str]:
+    messages: list[str] = []
+    payload = (stdout or "").strip()
+    if payload:
+        try:
+            data = json.loads(payload)
+            for value in data.get("errors", []):
+                text = str(value).strip()
+                if text:
+                    messages.append(text)
+            for file_info in data.get("files", {}).values():
+                for item in file_info.get("messages", []):
+                    text = str(item.get("message", "")).strip()
+                    if text:
+                        messages.append(text)
+        except json.JSONDecodeError:
+            for line in payload.splitlines():
+                text = line.strip()
+                if text:
+                    messages.append(text)
+    if not messages:
+        for line in (stderr or "").splitlines():
+            text = line.strip()
+            if text:
+                messages.append(text)
+    return messages
+
+
+def _run_phpstan(snippets: list[str], failure_mode: str = "syntax_only") -> dict[str, Any]:
+    phpstan_bin = shutil.which("phpstan")
+    mode = str(failure_mode).strip().lower()
+    if mode not in {"syntax_only", "strict"}:
+        mode = "syntax_only"
+    summary: dict[str, Any] = {
+        "enabled": True,
+        "available": bool(phpstan_bin),
+        "failure_mode": mode,
+        "checked": 0,
+        "passed": 0,
+        "failed": 0,
+        "syntax_errors": 0,
+        "errors": [],
+    }
+    if not phpstan_bin or not snippets:
+        return summary
+
+    for index, snippet in enumerate(snippets, start=1):
+        tmp_path = _write_temp_php(snippet)
+        try:
+            proc = subprocess.run(
+                [
+                    phpstan_bin,
+                    "analyse",
+                    "--no-progress",
+                    "--error-format=json",
+                    "--level=0",
+                    str(tmp_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        summary["checked"] += 1
+        messages = _extract_phpstan_messages(proc.stdout, proc.stderr)
+        syntax_hits = [message for message in messages if PHPSTAN_SYNTAX_ERROR_RE.search(message)]
+        summary["syntax_errors"] += len(syntax_hits)
+        if mode == "syntax_only":
+            failed = len(syntax_hits) > 0
+        else:
+            failed = proc.returncode != 0
+
+        if failed:
+            summary["failed"] += 1
+            message = "; ".join(syntax_hits if mode == "syntax_only" and syntax_hits else messages)[:500]
+            summary["errors"].append({"snippet": index, "message": message or "phpstan analysis failed"})
+        else:
+            summary["passed"] += 1
+    return summary
+
+
 def _run_external_checks(output: str, eval_cfg: dict[str, Any]) -> dict[str, Any]:
     snippets = _extract_code_blocks(output)
     max_snippets = max(1, int(eval_cfg.get("max_code_checks_per_response", 3)))
@@ -345,6 +431,16 @@ def _run_external_checks(output: str, eval_cfg: dict[str, Any]) -> dict[str, Any
             "failed": 0,
             "errors": [],
         },
+        "phpstan": {
+            "enabled": bool(eval_cfg.get("run_phpstan", False)),
+            "available": False,
+            "failure_mode": str(eval_cfg.get("phpstan_failure_mode", "syntax_only")).strip().lower(),
+            "checked": 0,
+            "passed": 0,
+            "failed": 0,
+            "syntax_errors": 0,
+            "errors": [],
+        },
     }
 
     if eval_cfg.get("run_php_lint", True):
@@ -352,6 +448,11 @@ def _run_external_checks(output: str, eval_cfg: dict[str, Any]) -> dict[str, Any
 
     if eval_cfg.get("run_phpcs", False):
         external["phpcs"] = _run_phpcs(snippets)
+    if eval_cfg.get("run_phpstan", False):
+        external["phpstan"] = _run_phpstan(
+            snippets,
+            failure_mode=str(eval_cfg.get("phpstan_failure_mode", "syntax_only")),
+        )
 
     return external
 
@@ -378,6 +479,11 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
         lint_weight += 0.1
         lint_score *= phpcs.get("passed", 0) / max(1, phpcs.get("checked", 0))
 
+    phpstan = external_checks.get("phpstan", {})
+    if phpstan.get("enabled") and phpstan.get("available") and phpstan.get("checked", 0) > 0:
+        lint_weight += 0.1
+        lint_score *= phpstan.get("passed", 0) / max(1, phpstan.get("checked", 0))
+
     base_weight = 1.0 - lint_weight
     score = (required_score * base_weight) + (lint_score * lint_weight)
     score = round(score, 4)
@@ -393,6 +499,12 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
         and phpcs.get("checked", 0) > 0
         and phpcs.get("failed", 0) > 0
     )
+    passes_phpstan = not (
+        phpstan.get("enabled")
+        and phpstan.get("available")
+        and phpstan.get("checked", 0) > 0
+        and phpstan.get("failed", 0) > 0
+    )
 
     return {
         "score": score,
@@ -402,7 +514,8 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
         "passes_required": passes_required,
         "passes_php_lint": passes_php_lint,
         "passes_phpcs": passes_phpcs,
-        "passed": passes_required and passes_php_lint and passes_phpcs,
+        "passes_phpstan": passes_phpstan,
+        "passed": passes_required and passes_php_lint and passes_phpcs and passes_phpstan,
     }
 
 

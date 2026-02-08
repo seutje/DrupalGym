@@ -75,35 +75,48 @@ class DocumentationFetcher:
             path += ".html"
         return self.base_docs_dir / domain / path
 
-    def discover_links(self, url: str, allowed_prefixes: list[str]) -> list[str]:
+    def discover_links(self, url: str, allowed_prefixes: list[str], url_denylist_terms: list[str] | None = None) -> list[str]:
         try:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "lxml")
             links: list[str] = []
+            denylist = [term.lower() for term in (url_denylist_terms or []) if str(term).strip()]
             for anchor in soup.find_all("a", href=True):
                 full_url = urljoin(url, anchor["href"]).split("#")[0]
                 if full_url in self.visited:
                     continue
                 if any(full_url.startswith(prefix) for prefix in allowed_prefixes):
+                    full_url_lower = full_url.lower()
+                    if any(term in full_url_lower for term in denylist):
+                        continue
                     links.append(full_url)
             return links
         except Exception as exc:
             self.logger.error(f"Discovery failed for {url}: {exc}")
             return []
 
-    def recursive_fetch(self, start_url: str, allowed_prefixes: list[str], max_pages: int = 100) -> dict:
+    def recursive_fetch(
+        self,
+        start_url: str,
+        allowed_prefixes: list[str],
+        max_pages: int = 100,
+        url_denylist_terms: list[str] | None = None,
+    ) -> dict:
         queue = [start_url]
         captured = 0
         bytes_written = 0
         retries_total = 0
         failed_pages = 0
+        denylist = [term.lower() for term in (url_denylist_terms or []) if str(term).strip()]
 
         while queue and captured < max_pages:
             url = queue.pop(0)
             if url in self.visited:
                 continue
             if not any(url.startswith(prefix) for prefix in allowed_prefixes):
+                continue
+            if any(term in url.lower() for term in denylist):
                 continue
 
             self.visited.add(url)
@@ -115,7 +128,11 @@ class DocumentationFetcher:
                 captured += 1
                 bytes_written += int(result.get("bytes", 0))
                 if url.endswith((".html", "/")) or "." not in url.split("/")[-1] or "api.drupal.org" in url:
-                    queue.extend(link for link in self.discover_links(url, allowed_prefixes) if link not in self.visited)
+                    queue.extend(
+                        link
+                        for link in self.discover_links(url, allowed_prefixes, url_denylist_terms=denylist)
+                        if link not in self.visited
+                    )
             else:
                 failed_pages += 1
 
@@ -205,9 +222,27 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
     docs_cfg = config.get("acquisition", {}).get("docs", {})
     max_pages_per_source = int(docs_cfg.get("max_pages_per_source", 200))
     allowed_prefixes_cfg = docs_cfg.get("allowed_prefixes", {})
+    url_denylist_terms = [str(term).strip() for term in docs_cfg.get("url_denylist_terms", []) if str(term).strip()]
+    excluded_source_ids = {
+        str(source_id).strip().lower()
+        for source_id in config.get("acquisition", {}).get("exclude_source_ids", [])
+        if str(source_id).strip()
+    }
 
     for source in sources_data.get("sources", {}).get("curated", []):
         source_id = source["id"]
+        if str(source_id).strip().lower() in excluded_source_ids:
+            fetch_status.append(
+                {
+                    "source_id": source_id,
+                    "type": source.get("type", "unknown"),
+                    "success": True,
+                    "status": "skipped_excluded",
+                    "bytes": 0,
+                    "retried": 0,
+                }
+            )
+            continue
         source_type = source["type"]
         url = source["url"]
         ref = source.get("ref")
@@ -244,8 +279,14 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
                 source_id=source_id,
                 allowed_prefixes=allowed_prefixes,
                 max_pages=max_pages_per_source,
+                url_denylist_terms=url_denylist_terms,
             )
-            result = fetcher.recursive_fetch(url, allowed_prefixes=allowed_prefixes, max_pages=max_pages_per_source)
+            result = fetcher.recursive_fetch(
+                url,
+                allowed_prefixes=allowed_prefixes,
+                max_pages=max_pages_per_source,
+                url_denylist_terms=url_denylist_terms,
+            )
             doc_pages_total += int(result.get("pages", 0))
             manifest.add_output(
                 source_id,
@@ -273,11 +314,24 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
                     "pages": int(result.get("pages", 0)),
                     "failed_pages": int(result.get("failed_pages", 0)),
                     "allowed_prefixes": allowed_prefixes,
+                    "url_denylist_terms": url_denylist_terms,
                 }
             )
 
     for source in sources_data.get("sources", {}).get("drupal_org_projects", []):
         source_id = source["id"]
+        if str(source_id).strip().lower() in excluded_source_ids:
+            fetch_status.append(
+                {
+                    "source_id": source_id,
+                    "type": source.get("type", "git"),
+                    "success": True,
+                    "status": "skipped_excluded",
+                    "bytes": 0,
+                    "retried": 0,
+                }
+            )
+            continue
         url = source["url"]
         ref = source.get("ref", "master")
         target_dir = repos_dir / source_id
