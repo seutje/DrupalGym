@@ -2,7 +2,9 @@ import unittest
 
 from pipeline.dataset_refinement import (
     _chunk_sample,
+    _enforce_source_share_cap,
     _is_augmentation_candidate,
+    _sample_matches_category,
     _rebalance_test_ratio,
     _source_matches_prefix,
     _split_dataset,
@@ -58,8 +60,24 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         }
         chunks = _chunk_sample(sample, max_output_lines=300, overlap_lines=30)
         self.assertGreater(len(chunks), 1)
-        self.assertIn("[Part 1/", chunks[0]["instruction"])
+        self.assertEqual(
+            chunks[0]["instruction"],
+            "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+        )
+        self.assertEqual(chunks[0]["metadata"]["refinement"]["chunk_index"], 1)
+        self.assertEqual(chunks[0]["metadata"]["refinement"]["chunk_total"], len(chunks))
         self.assertLessEqual(len(chunks[0]["output"].splitlines()), 300)
+
+    def test_chunk_sample_suffix_mode_adds_instruction_marker(self):
+        output = "\n".join([f"line_{idx}" for idx in range(1, 610)])
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+            "input": "",
+            "output": output,
+            "metadata": {"source": "repos/example/src/Example.php"},
+        }
+        chunks = _chunk_sample(sample, max_output_lines=300, overlap_lines=30, instruction_mode="suffix")
+        self.assertIn("[Part 1/", chunks[0]["instruction"])
 
     def test_rebalance_reduces_test_ratio(self):
         samples = []
@@ -199,6 +217,44 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         }
         self.assertTrue(_source_matches_prefix(sample, ["docs/symfony_com/"]))
         self.assertFalse(_source_matches_prefix(sample, ["docs/drupal_org/"]))
+
+    def test_enforce_source_share_cap_drops_overrepresented_bucket(self):
+        samples = []
+        for idx in range(90):
+            samples.append(
+                {
+                    "instruction": f"a_{idx}",
+                    "input": "",
+                    "output": "<?php\nclass A {}\n",
+                    "metadata": {"source": f"repos/drupal_core/core/src/A{idx}.php"},
+                }
+            )
+        for idx in range(10):
+            samples.append(
+                {
+                    "instruction": f"b_{idx}",
+                    "input": "",
+                    "output": "<?php\nclass B {}\n",
+                    "metadata": {"source": f"repos/example/src/B{idx}.php"},
+                }
+            )
+
+        kept, dropped, concentration = _enforce_source_share_cap(samples, max_source_share=0.45, seed=42)
+        self.assertGreater(len(dropped), 0)
+        core = next(item for item in concentration if item["source_prefix"] == "repos/drupal_core")
+        self.assertLess(core["share"], 0.9)
+        self.assertLessEqual(core["share"], 0.5)
+        self.assertEqual(len(kept) + len(dropped), len(samples))
+
+    def test_sample_matches_category(self):
+        sample = {
+            "instruction": "Create a Drupal 11 service with constructor injection.",
+            "input": "",
+            "output": "services:\n  gym.logger:\n    class: Drupal\\gym\\Logger\n",
+            "metadata": {"source": "repos/example/gym.services.yml"},
+        }
+        self.assertTrue(_sample_matches_category(sample, "di"))
+        self.assertFalse(_sample_matches_category(sample, "sdc"))
 
 
 if __name__ == "__main__":

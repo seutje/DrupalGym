@@ -214,6 +214,28 @@ def _audit_dataset_artifacts(
     logger.info("Dataset artifact audit completed.", **summary)
     return summary["failed_samples"] == 0
 
+
+def _load_quality_scorecard(dataset_dir: Path, logger: PipelineLogger) -> dict[str, Any] | None:
+    scorecard_path = dataset_dir / "quality_scorecard.json"
+    if not scorecard_path.exists():
+        logger.error(f"Missing required quality scorecard: {scorecard_path}")
+        return None
+
+    try:
+        with open(scorecard_path, "r", encoding="utf-8") as handle:
+            scorecard = json.load(handle)
+    except Exception as exc:
+        logger.error(f"Failed to read quality scorecard: {exc}")
+        return None
+
+    if not bool(scorecard.get("overall_passed", False)):
+        failed_checks = [name for name, passed in (scorecard.get("checks", {}) or {}).items() if not bool(passed)]
+        logger.error("Quality scorecard checks failed; refusing to train.", failed_checks=failed_checks)
+        return None
+
+    logger.info("Quality scorecard gate passed.", scorecard_path=str(scorecard_path))
+    return scorecard
+
 def train_model(
     model_config: dict,
     dataset_dir: Path,
@@ -372,6 +394,8 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
     dataset_dir = root / "dataset" / dataset_version
     if not dataset_dir.exists():
         logger.error(f"Dataset version {dataset_version} not found at {dataset_dir}")
+        return 1
+    if _load_quality_scorecard(dataset_dir, logger) is None:
         return 1
     models_dir = root / "models"
     

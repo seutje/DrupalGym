@@ -175,6 +175,10 @@ def _default_prefix_for_url(url: str) -> list[str]:
     return [url]
 
 
+def _doc_fetch_is_valid(result: dict) -> bool:
+    return bool(result.get("success")) and int(result.get("pages", 0)) > 0
+
+
 def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
     sources_manifest_path = root / "sources" / "manifest.json"
     if not sources_manifest_path.exists():
@@ -196,6 +200,7 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
     failure_count = 0
     doc_pages_total = 0
     fetch_status: list[dict] = []
+    zero_page_doc_sources = 0
 
     docs_cfg = config.get("acquisition", {}).get("docs", {})
     max_pages_per_source = int(docs_cfg.get("max_pages_per_source", 200))
@@ -247,17 +252,22 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
                 str((docs_dir / urlparse(url).netloc.replace(".", "_")).relative_to(root)),
                 "collection",
             )
-            if result.get("success"):
+            is_valid_doc_fetch = _doc_fetch_is_valid(result)
+            if is_valid_doc_fetch:
                 success_count += 1
             else:
                 failure_count += 1
+                if int(result.get("pages", 0)) <= 0:
+                    zero_page_doc_sources += 1
 
             fetch_status.append(
                 {
                     "source_id": source_id,
                     "type": "http",
-                    "success": bool(result.get("success")),
-                    "status": "ok" if result.get("success") else "failed",
+                    "success": is_valid_doc_fetch,
+                    "status": "ok" if is_valid_doc_fetch else "failed_zero_pages"
+                    if int(result.get("pages", 0)) <= 0
+                    else "failed",
                     "bytes": int(result.get("bytes", 0)),
                     "retried": int(result.get("retried", 0)),
                     "pages": int(result.get("pages", 0)),
@@ -297,6 +307,7 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
             "success_count": success_count,
             "failure_count": failure_count,
             "doc_pages_captured": doc_pages_total,
+            "zero_page_doc_sources": zero_page_doc_sources,
             "total_repos": len(sources_data.get("sources", {}).get("drupal_org_projects", [])) + 1,
         }
     )

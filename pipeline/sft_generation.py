@@ -7,7 +7,11 @@ from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
 
 
-DECLARATION_RE = re.compile(r"\b(class|interface|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
+DECLARATION_RE = re.compile(
+    r"(?m)^[ \t]*(?:final\s+|abstract\s+)?(?:readonly\s+)?(class|interface|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)\b"
+)
+PHP_COMMENT_RE = re.compile(r"/\*.*?\*/|//[^\n]*|#(?!\[)[^\n]*", re.DOTALL)
+VALID_SYMBOL_RE = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 
 
 class InstructionGenerator:
@@ -26,9 +30,10 @@ class InstructionGenerator:
         self.samples.append(sample)
 
     def _sanitize_symbol_name(self, candidate: str) -> str:
-        cleaned = re.sub(r"[^A-Za-z0-9_]", "", candidate)
-        if not cleaned:
+        parts = re.findall(r"[A-Za-z0-9]+", candidate)
+        if not parts:
             return "UnknownSymbol"
+        cleaned = "".join(part[:1].upper() + part[1:] for part in parts if part)
         if not cleaned[0].isalpha():
             cleaned = f"Symbol{cleaned}"
         return cleaned
@@ -37,14 +42,32 @@ class InstructionGenerator:
         stem = Path(rel_path).stem
         return self._sanitize_symbol_name(stem)
 
-    def generate_from_php(self, content: str, rel_path: str):
-        declaration = DECLARATION_RE.search(content)
-        if declaration:
+    def _kind_from_path(self, rel_path: str) -> str:
+        base = Path(rel_path).name.lower()
+        if base.endswith("interface.php"):
+            return "interface"
+        if base.endswith("trait.php"):
+            return "trait"
+        if base.endswith("enum.php"):
+            return "enum"
+        return "class"
+
+    def _extract_symbol_from_php(self, content: str, rel_path: str) -> tuple[str, str, str]:
+        sanitized = PHP_COMMENT_RE.sub("", content)
+        matches = list(DECLARATION_RE.finditer(sanitized))
+        if len(matches) == 1:
+            declaration = matches[0]
             symbol_kind = declaration.group(1)
             symbol_name = declaration.group(2)
-        else:
-            symbol_kind = "class"
-            symbol_name = self._symbol_from_path(rel_path)
+            if VALID_SYMBOL_RE.match(symbol_name):
+                return symbol_kind, symbol_name, "declaration"
+
+        # Multiple declarations can represent compound files; use deterministic
+        # path fallback to avoid malformed instruction slots.
+        return self._kind_from_path(rel_path), self._symbol_from_path(rel_path), "path_fallback"
+
+    def generate_from_php(self, content: str, rel_path: str):
+        symbol_kind, symbol_name, extraction_method = self._extract_symbol_from_php(content, rel_path)
 
         if self.enable_symbol_kind_prompts:
             instruction = (
@@ -63,13 +86,14 @@ class InstructionGenerator:
                     "type": "code_reference",
                     "symbol_kind": symbol_kind,
                     "symbol_name": symbol_name,
+                    "symbol_extraction_method": extraction_method,
                 },
             }
         )
 
     def generate_from_yaml(self, content: str, rel_path: str):
         stem = Path(rel_path).stem.replace("_", " ")
-        instruction = f"Provide the Drupal 11 YAML configuration from {rel_path} and explain what it defines."
+        instruction = f"Provide the Drupal 11 YAML configuration from {rel_path}."
         self._append(
             {
                 "instruction": instruction,

@@ -1,6 +1,6 @@
 {
   "stage": "sources",
-  "timestamp": "2026-02-07T17:04:09Z",
+  "timestamp": "2026-02-08T09:26:56Z",
   "seed": 42,
   "rate_limit": {
     "delay_seconds": 1.0,
@@ -8,12 +8,12 @@
   },
   "metrics": {
     "projects_discovered": 1000,
-    "projects_candidates": 15,
-    "projects_filtered": 15,
+    "projects_candidates": 14,
+    "projects_filtered": 14,
     "curated_sources": 5,
     "rejection_reasons": {
-      "core_not_drupal11": 298,
-      "missing_composer": 529,
+      "missing_composer": 534,
+      "core_not_drupal11": 294,
       "php_constraint_too_low": 157,
       "archived_or_security_only": 1
     },
@@ -89,7 +89,7 @@
         "core_constraint": "^11.3",
         "php_constraint": ">=8.3",
         "last_changed": "2026-02-05T07:04:48Z",
-        "last_changed_days": 2,
+        "last_changed_days": 3,
         "has_tests": false,
         "usage": 21,
         "selection_reason": "drupal_core=^11.3; php=>=8.3; recent=True; has_tests=False"
@@ -107,7 +107,7 @@
         "core_constraint": "^10.3 || ^11",
         "php_constraint": ">=8.3",
         "last_changed": "2026-01-10T02:42:06Z",
-        "last_changed_days": 28,
+        "last_changed_days": 29,
         "has_tests": false,
         "usage": 6,
         "selection_reason": "drupal_core=^10.3 || ^11; php=>=8.3; recent=True; has_tests=False"
@@ -125,7 +125,7 @@
         "core_constraint": "^11.1",
         "php_constraint": ">=8.3",
         "last_changed": "2025-12-16T19:12:53Z",
-        "last_changed_days": 52,
+        "last_changed_days": 53,
         "has_tests": false,
         "usage": 3,
         "selection_reason": "drupal_core=^11.1; php=>=8.3; recent=True; has_tests=False"
@@ -143,7 +143,7 @@
         "core_constraint": "^10.5 || ^11.2",
         "php_constraint": ">=8.3",
         "last_changed": "2026-01-22T05:08:36Z",
-        "last_changed_days": 16,
+        "last_changed_days": 17,
         "has_tests": false,
         "usage": 3,
         "selection_reason": "drupal_core=^10.5 || ^11.2; php=>=8.3; recent=True; has_tests=False"
@@ -161,28 +161,10 @@
         "core_constraint": "^11",
         "php_constraint": ">=8.3",
         "last_changed": "2025-12-28T04:50:28Z",
-        "last_changed_days": 41,
+        "last_changed_days": 42,
         "has_tests": false,
         "usage": 1,
         "selection_reason": "drupal_core=^11; php=>=8.3; recent=True; has_tests=False"
-      },
-      {
-        "id": "eca_entity_import",
-        "type": "git",
-        "url": "https://git.drupalcode.org/project/eca_entity_import.git",
-        "ref": "1.0.x",
-        "composer_url": "https://git.drupalcode.org/project/eca_entity_import/raw/1.0.x/composer.json",
-        "composer_constraints": {
-          "drupal_core": "^11.2",
-          "php": ">=8.3"
-        },
-        "core_constraint": "^11.2",
-        "php_constraint": ">=8.3",
-        "last_changed": "2025-12-04T13:21:14Z",
-        "last_changed_days": 65,
-        "has_tests": false,
-        "usage": 1,
-        "selection_reason": "drupal_core=^11.2; php=>=8.3; recent=True; has_tests=False"
       },
       {
         "id": "commerce_referral",
@@ -251,7 +233,7 @@
         "core_constraint": "^11",
         "php_constraint": ">=8.3",
         "last_changed": "2026-01-04T20:31:05Z",
-        "last_changed_days": 33,
+        "last_changed_days": 34,
         "has_tests": false,
         "usage": 0,
         "selection_reason": "drupal_core=^11; php=>=8.3; recent=True; has_tests=False"
@@ -269,7 +251,7 @@
         "core_constraint": "^11",
         "php_constraint": ">=8.3",
         "last_changed": "2026-01-04T20:27:22Z",
-        "last_changed_days": 33,
+        "last_changed_days": 34,
         "has_tests": false,
         "usage": 0,
         "selection_reason": "drupal_core=^11; php=>=8.3; recent=True; has_tests=False"
@@ -287,7 +269,7 @@
         "core_constraint": "^11",
         "php_constraint": ">=8.3",
         "last_changed": "2026-01-04T20:34:22Z",
-        "last_changed_days": 33,
+        "last_changed_days": 34,
         "has_tests": false,
         "usage": 0,
         "selection_reason": "drupal_core=^11; php=>=8.3; recent=True; has_tests=False"
@@ -305,7 +287,7 @@
         "core_constraint": "^11",
         "php_constraint": ">=8.3",
         "last_changed": "2026-01-04T20:15:32Z",
-        "last_changed_days": 33,
+        "last_changed_days": 34,
         "has_tests": false,
         "usage": 0,
         "selection_reason": "drupal_core=^11; php=>=8.3; recent=True; has_tests=False"
@@ -323,7 +305,7 @@
         "core_constraint": "^11.2",
         "php_constraint": ">=8.3",
         "last_changed": "2026-01-04T20:40:58Z",
-        "last_changed_days": 33,
+        "last_changed_days": 34,
         "has_tests": false,
         "usage": 0,
         "selection_reason": "drupal_core=^11.2; php=>=8.3; recent=True; has_tests=False"

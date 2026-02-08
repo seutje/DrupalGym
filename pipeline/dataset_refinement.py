@@ -20,6 +20,12 @@ PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
 MAX_NUMERIC_LINE_STREAK = 12
+CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "attributes": ["attribute", "plugin", "block", "#["],
+    "di": ["service", "dependency", "container", "inject"],
+    "routing": ["routing", "route", "controller", "path"],
+    "sdc": ["component", "twig", "sdc"],
+}
 
 
 def _has_predominantly_numeric_fenced_block(output: str) -> bool:
@@ -170,7 +176,7 @@ def _validate_sample(sample: dict[str, Any]) -> tuple[bool, str]:
 
 
 def _chunk_sample(
-    sample: dict[str, Any], max_output_lines: int, overlap_lines: int
+    sample: dict[str, Any], max_output_lines: int, overlap_lines: int, instruction_mode: str = "metadata_only"
 ) -> list[dict[str, Any]]:
     output = sample.get("output", "")
     lines = output.splitlines()
@@ -196,9 +202,12 @@ def _chunk_sample(
             chunk_output += "\n"
         record["output"] = chunk_output
         base_instruction = str(sample.get("instruction", "")).strip()
-        record["instruction"] = (
-            f"{base_instruction} [Part {idx}/{total}, lines {start + 1}-{end}]"
-        )
+        if instruction_mode == "suffix":
+            record["instruction"] = (
+                f"{base_instruction} [Part {idx}/{total}, lines {start + 1}-{end}]"
+            )
+        else:
+            record["instruction"] = base_instruction
         metadata = dict(record.get("metadata", {}))
         refinement = dict(metadata.get("refinement", {}))
         refinement.update(
@@ -454,18 +463,113 @@ def _score_candidate_for_feedback(sample: dict[str, Any], weak_categories: list[
         return 0
     source = str(sample.get("metadata", {}).get("source", "")).lower()
     text = f"{source} {sample.get('instruction', '')}".lower()
-    category_keywords = {
-        "attributes": ["attribute", "plugin", "block", "#["],
-        "di": ["service", "dependency", "container", "inject"],
-        "routing": ["routing", "route", "controller", "path"],
-        "sdc": ["component", "twig", "sdc"],
-    }
     score = 0
     for category in weak_categories:
-        keywords = category_keywords.get(category, [category])
+        keywords = CATEGORY_KEYWORDS.get(category, [category])
         if any(keyword in text for keyword in keywords):
             score += 1
     return score
+
+
+def _sample_matches_category(sample: dict[str, Any], category: str) -> bool:
+    keywords = CATEGORY_KEYWORDS.get(category, [category])
+    source = str(sample.get("metadata", {}).get("source", "")).lower()
+    instruction = str(sample.get("instruction", "")).lower()
+    input_text = str(sample.get("input", "")).lower()
+    output = str(sample.get("output", "")).lower()
+    blob = " ".join([source, instruction, input_text, output])
+    return any(keyword in blob for keyword in keywords)
+
+
+def _source_bucket(sample: dict[str, Any]) -> str:
+    source = _sample_source(sample)
+    parts = [part for part in source.split("/") if part]
+    if len(parts) >= 2:
+        return f"{parts[0]}/{parts[1]}"
+    if parts:
+        return parts[0]
+    return "__unknown__"
+
+
+def _source_concentration(samples: list[dict[str, Any]], top_n: int = 10) -> list[dict[str, Any]]:
+    if not samples:
+        return []
+    counts: dict[str, int] = {}
+    for sample in samples:
+        bucket = _source_bucket(sample)
+        counts[bucket] = counts.get(bucket, 0) + 1
+    total = len(samples)
+    ordered = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    output: list[dict[str, Any]] = []
+    for bucket, count in ordered[:top_n]:
+        output.append(
+            {
+                "source_prefix": bucket,
+                "count": count,
+                "share": round(count / total, 4),
+            }
+        )
+    return output
+
+
+def _enforce_source_share_cap(
+    samples: list[dict[str, Any]], max_source_share: float, seed: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    if not samples or max_source_share <= 0 or max_source_share >= 1:
+        return samples, [], _source_concentration(samples)
+
+    bucket_indices: dict[str, list[int]] = {}
+    for idx, sample in enumerate(samples):
+        bucket_indices.setdefault(_source_bucket(sample), []).append(idx)
+
+    current_counts = {bucket: len(indices) for bucket, indices in bucket_indices.items()}
+    drop_plan = {bucket: 0 for bucket in bucket_indices}
+
+    while True:
+        total_current = sum(current_counts.values())
+        changed = False
+        for bucket, count in sorted(current_counts.items(), key=lambda item: item[1], reverse=True):
+            if count <= 0:
+                continue
+            others = total_current - count
+            if others <= 0:
+                allowed = 1
+            else:
+                allowed = int((max_source_share * others) / (1.0 - max_source_share))
+                allowed = max(1, allowed)
+            if count <= allowed:
+                continue
+
+            to_drop = count - allowed
+            current_counts[bucket] -= to_drop
+            drop_plan[bucket] += to_drop
+            total_current -= to_drop
+            changed = True
+        if not changed:
+            break
+
+    keep_mask = [True] * len(samples)
+    rng = random.Random(seed)
+    for bucket, indices in bucket_indices.items():
+        planned_drops = drop_plan.get(bucket, 0)
+        if planned_drops <= 0:
+            continue
+        shuffled = list(indices)
+        rng.shuffle(shuffled)
+        for drop_idx in shuffled[:planned_drops]:
+            keep_mask[drop_idx] = False
+
+    kept = [sample for idx, sample in enumerate(samples) if keep_mask[idx]]
+    dropped = [sample for idx, sample in enumerate(samples) if not keep_mask[idx]]
+    return kept, dropped, _source_concentration(kept)
+
+
+def _percentile(values: list[int], p: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    idx = int((len(ordered) - 1) * p)
+    return ordered[max(0, min(len(ordered) - 1, idx))]
 
 
 def _write_jsonl(path: Path, samples: list[dict[str, Any]]) -> None:
@@ -482,6 +586,14 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
         "output_version": "v2",
         "seed": seed,
         "max_output_lines": 300,
+        "max_output_chars": 6000,
+        "max_source_share": 0.45,
+        "chunk_instruction_mode": "metadata_only",
+        "weak_category_targets": {
+            "attributes": 600,
+            "di": 600,
+            "sdc": 400,
+        },
         "chunk_overlap_lines": 30,
         "target_test_ratio": 0.15,
         "exclude_test_sources_from_training_pool": True,
@@ -500,7 +612,9 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
     }
     merged = defaults | config.get("dataset_refinement", {})
     merged_augmentation = defaults["augmentation"] | merged.get("augmentation", {})
+    merged_weak_targets = defaults["weak_category_targets"] | merged.get("weak_category_targets", {})
     merged["augmentation"] = merged_augmentation
+    merged["weak_category_targets"] = merged_weak_targets
     return merged
 
 
@@ -557,12 +671,30 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         rejected_records.append(rejected)
         rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
 
+    max_output_chars = int(refine_cfg.get("max_output_chars", 6000))
+    length_filtered_records: list[dict[str, Any]] = []
+    for sample in filtered_records:
+        output_len = len(str(sample.get("output", "")))
+        if output_len > max_output_chars:
+            rejected = copy.deepcopy(sample)
+            rejected["rejection_reason"] = "max_output_chars"
+            rejected_records.append(rejected)
+            rejection_reasons["max_output_chars"] = rejection_reasons.get("max_output_chars", 0) + 1
+            continue
+        length_filtered_records.append(sample)
+
     max_output_lines = int(refine_cfg["max_output_lines"])
     overlap_lines = int(refine_cfg["chunk_overlap_lines"])
+    chunk_instruction_mode = str(refine_cfg.get("chunk_instruction_mode", "metadata_only"))
     chunked_records: list[dict[str, Any]] = []
     chunked_source_count = 0
-    for sample in filtered_records:
-        chunks = _chunk_sample(sample, max_output_lines=max_output_lines, overlap_lines=overlap_lines)
+    for sample in length_filtered_records:
+        chunks = _chunk_sample(
+            sample,
+            max_output_lines=max_output_lines,
+            overlap_lines=overlap_lines,
+            instruction_mode=chunk_instruction_mode,
+        )
         if len(chunks) > 1:
             chunked_source_count += 1
         chunked_records.extend(chunks)
@@ -620,16 +752,34 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         candidate_count = int(len(candidate_records) * ratio)
         rng = random.Random(int(refine_cfg["seed"]) + 53)
         candidate_indices = list(range(len(candidate_records)))
-        rng.shuffle(candidate_indices)
-        weak_categories = feedback_targets.get("weak_categories", [])
+        weak_categories = list(feedback_targets.get("weak_categories", []))
+        weak_targets_cfg = {
+            str(category): int(target)
+            for category, target in (refine_cfg.get("weak_category_targets", {}) or {}).items()
+        }
+
         candidate_indices.sort(
-            key=lambda idx: (
-                _score_candidate_for_feedback(candidate_records[idx], weak_categories),
-                -idx,
-            ),
+            key=lambda idx: _score_candidate_for_feedback(candidate_records[idx], weak_categories),
             reverse=True,
         )
-        selected_indices = sorted(candidate_indices[:candidate_count])
+        selected_index_set: set[int] = set()
+        remaining_slots = max(0, candidate_count)
+
+        for category, target in weak_targets_cfg.items():
+            if remaining_slots <= 0:
+                break
+            if target <= 0:
+                continue
+            matching = [idx for idx in candidate_indices if idx not in selected_index_set and _sample_matches_category(candidate_records[idx], category)]
+            rng.shuffle(matching)
+            picks = matching[: min(remaining_slots, target)]
+            selected_index_set.update(picks)
+            remaining_slots -= len(picks)
+
+        fallback_candidates = [idx for idx in candidate_indices if idx not in selected_index_set]
+        rng.shuffle(fallback_candidates)
+        selected_index_set.update(fallback_candidates[:remaining_slots])
+        selected_indices = sorted(selected_index_set)
         aug_types = augmentation_cfg.get(
             "types",
             ["bugfix", "refactor", "write_from_spec", "explain_and_implement"],
@@ -651,6 +801,21 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             )
 
     final_records = rebalanced_records + augmented_records
+    max_source_share = float(refine_cfg.get("max_source_share", 0.45))
+    final_records, source_share_dropped, source_concentration_top10 = _enforce_source_share_cap(
+        final_records,
+        max_source_share=max_source_share,
+        seed=int(refine_cfg["seed"]) + 89,
+    )
+    for dropped in source_share_dropped:
+        rejected = copy.deepcopy(dropped)
+        rejected["rejection_reason"] = "source_share_cap_drop"
+        rejected_records.append(rejected)
+    if source_share_dropped:
+        rejection_reasons["source_share_cap_drop"] = rejection_reasons.get("source_share_cap_drop", 0) + len(
+            source_share_dropped
+        )
+
     split_targets = config.get("dataset", {}).get("targets", {"train": 0.8, "valid": 0.1, "test": 0.1})
     splits = _split_dataset(final_records, split_targets, seed=int(refine_cfg["seed"]) + 101)
 
@@ -695,6 +860,85 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         calculate_hash(experimental_pool_path),
     )
 
+    weak_category_targets = {
+        str(category): int(target)
+        for category, target in (refine_cfg.get("weak_category_targets", {}) or {}).items()
+    }
+    weak_category_coverage = {
+        category: sum(1 for sample in splits["train"] if _sample_matches_category(sample, category))
+        for category in weak_category_targets
+    }
+
+    train_output_lengths = [len(str(sample.get("output", ""))) for sample in splits["train"]]
+    train_output_percentiles = {
+        "p50": _percentile(train_output_lengths, 0.50),
+        "p90": _percentile(train_output_lengths, 0.90),
+        "p95": _percentile(train_output_lengths, 0.95),
+        "p99": _percentile(train_output_lengths, 0.99),
+    }
+
+    quality_report_path = root / "quality" / "report.json"
+    yaml_too_short_share = 0.0
+    if quality_report_path.exists():
+        try:
+            with open(quality_report_path, "r", encoding="utf-8") as quality_handle:
+                quality_report = json.load(quality_handle)
+            yaml_reasons = (
+                quality_report.get("rejection_reasons_by_type", {}).get("yaml_reference", {})
+            )
+            yaml_total_rejections = sum(int(value) for value in yaml_reasons.values())
+            yaml_too_short = int(yaml_reasons.get("too_short", 0))
+            if yaml_total_rejections > 0:
+                yaml_too_short_share = yaml_too_short / yaml_total_rejections
+        except Exception:
+            yaml_too_short_share = 0.0
+
+    drupal_core_train_share = 0.0
+    for item in source_concentration_top10:
+        if item.get("source_prefix") == "repos/drupal_core":
+            drupal_core_train_share = float(item.get("share", 0.0))
+            break
+
+    malformed_instruction_count = int(rejection_reasons.get("malformed_instruction_class_slot", 0))
+    quality_scorecard = {
+        "dataset_version": refine_cfg["output_version"],
+        "thresholds": {
+            "malformed_instruction_class_slot_max": 50,
+            "yaml_too_short_share_max": 0.10,
+            "drupal_core_train_share_max": 0.45,
+            "train_output_p95_max": 9000,
+            "weak_category_targets": weak_category_targets,
+        },
+        "metrics": {
+            "malformed_instruction_class_slot": malformed_instruction_count,
+            "yaml_too_short_share": round(yaml_too_short_share, 4),
+            "drupal_core_train_share": round(drupal_core_train_share, 4),
+            "train_output_p95": train_output_percentiles["p95"],
+            "weak_category_coverage": weak_category_coverage,
+        },
+    }
+    quality_scorecard["checks"] = {
+        "malformed_instruction_class_slot": malformed_instruction_count <= 50,
+        "yaml_too_short_share": yaml_too_short_share <= 0.10,
+        "drupal_core_train_share": drupal_core_train_share <= 0.45,
+        "train_output_p95": train_output_percentiles["p95"] <= 9000,
+        "weak_category_coverage": all(
+            weak_category_coverage.get(category, 0) >= target for category, target in weak_category_targets.items()
+        )
+        if weak_category_targets
+        else True,
+    }
+    quality_scorecard["overall_passed"] = all(bool(value) for value in quality_scorecard["checks"].values())
+
+    quality_scorecard_path = output_dir / "quality_scorecard.json"
+    with open(quality_scorecard_path, "w", encoding="utf-8") as scorecard_handle:
+        json.dump(quality_scorecard, scorecard_handle, indent=2)
+    manifest.add_output(
+        "quality_scorecard",
+        f"dataset/{refine_cfg['output_version']}/quality_scorecard.json",
+        calculate_hash(quality_scorecard_path),
+    )
+
     sample_type_distribution: dict[str, int] = {"retrieval": 0}
     for sample in augmented_records:
         aug_type = sample.get("metadata", {}).get("refinement", {}).get("augmentation_type", "unknown")
@@ -704,6 +948,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
     yield_breakdown = {
         "input_records": len(records),
         "after_validation_filter": len(filtered_records),
+        "after_output_char_filter": len(length_filtered_records),
         "after_chunking": len(chunked_records),
         "after_test_pool_extraction": len(rebalanced_records),
         "after_augmentation": len(final_records),
@@ -713,12 +958,14 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
     metrics = {
         "input_total": len(records),
         "filtered_total": len(filtered_records),
+        "output_char_filtered_total": len(length_filtered_records),
         "chunked_source_records": chunked_source_count,
         "chunked_total_records": len(chunked_records),
         "rebalanced_total_records": len(rebalanced_records),
         "dropped_test_records": len(dropped_tests),
         "augmented_records": len(augmented_records),
         "augmentation_candidate_pool": len(candidate_records) if augmentation_cfg.get("enabled", True) else 0,
+        "source_share_cap_dropped": len(source_share_dropped),
         "final_total": len(final_records),
         "test_ratio_before_rebalance": round(test_ratio_before, 4),
         "test_ratio_after_rebalance": round(test_ratio_after, 4),
@@ -734,6 +981,10 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "sample_type_distribution": sample_type_distribution,
         "clean_pool_size": len(rebalanced_records),
         "experimental_pool_size": len(augmented_records),
+        "source_concentration_top10": source_concentration_top10,
+        "weak_category_coverage": weak_category_coverage,
+        "train_output_percentiles": train_output_percentiles,
+        "quality_scorecard": quality_scorecard,
     }
     manifest.set_metrics(metrics)
     manifest.save()

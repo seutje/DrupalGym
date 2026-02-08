@@ -1,0 +1,33 @@
+{
+  "dataset_version": "v2",
+  "thresholds": {
+    "malformed_instruction_class_slot_max": 50,
+    "yaml_too_short_share_max": 0.1,
+    "drupal_core_train_share_max": 0.45,
+    "train_output_p95_max": 9000,
+    "weak_category_targets": {
+      "attributes": 600,
+      "di": 600,
+      "sdc": 400
+    }
+  },
+  "metrics": {
+    "malformed_instruction_class_slot": 0,
+    "yaml_too_short_share": 0.1413,
+    "drupal_core_train_share": 0.45,
+    "train_output_p95": 5204,
+    "weak_category_coverage": {
+      "attributes": 3249,
+      "di": 2255,
+      "sdc": 2890
+    }
+  },
+  "checks": {
+    "malformed_instruction_class_slot": true,
+    "yaml_too_short_share": false,
+    "drupal_core_train_share": true,
+    "train_output_p95": true,
+    "weak_category_coverage": true
+  },
+  "overall_passed": false
+}

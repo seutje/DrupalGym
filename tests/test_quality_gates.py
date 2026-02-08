@@ -16,6 +16,8 @@ class QualityGateHelpersTest(unittest.TestCase):
                 "run_php_lint": False,
                 "min_output_chars": 10,
                 "max_output_chars": 5000,
+                "min_output_chars_by_type": {"yaml_reference": 20},
+                "max_output_chars_by_type": {"yaml_reference": 200},
             },
         )
 
@@ -101,6 +103,44 @@ class QualityGateHelpersTest(unittest.TestCase):
         ok, reason = self.gate.check_sample(sample)
         self.assertFalse(ok)
         self.assertEqual(reason, "numeric_code_block_artifact")
+
+    def test_yaml_instruction_output_mismatch_rejected(self):
+        sample = {
+            "instruction": "Explain this file.",
+            "input": "",
+            "output": "name: DrupalGym\n",
+            "metadata": {"source": "repos/example/foo.services.yml", "type": "yaml_reference"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "yaml_instruction_output_mismatch")
+
+    def test_yaml_uses_type_specific_min_length(self):
+        sample = {
+            "instruction": "Provide the Drupal 11 YAML configuration from repos/example/foo.services.yml.",
+            "input": "",
+            "output": "a: b\n",
+            "metadata": {"source": "repos/example/foo.services.yml", "type": "yaml_reference"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "too_short")
+
+    def test_procedural_php_without_namespace_allowed(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/example.module.",
+            "input": "",
+            "output": (
+                "<?php\n"
+                "function example_help(): string {\n"
+                "  return 'Drupal 11 procedural module file output that is long enough.';\n"
+                "}\n"
+            ),
+            "metadata": {"source": "repos/example/example.module", "type": "code_reference"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "")
 
 
 if __name__ == "__main__":

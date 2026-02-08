@@ -15,6 +15,24 @@ SYMBOL_PROMPT_RE = re.compile(
 PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
+PROCEDURAL_EXTENSIONS = (".module", ".install", ".inc", ".theme", ".profile")
+ROOT_PROCEDURAL_PHP = {
+    "index.php",
+    "update.php",
+    "autoload.php",
+    ".ht.router.php",
+    "authorize.php",
+    "cron.php",
+    "rebuild.php",
+}
+
+
+def _percentile(values: list[int], p: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    idx = int((len(ordered) - 1) * p)
+    return ordered[max(0, min(len(ordered) - 1, idx))]
 
 
 class QualityGate:
@@ -23,6 +41,14 @@ class QualityGate:
         cfg = config or {}
         self.min_output_chars = int(cfg.get("min_output_chars", 150))
         self.max_output_chars = int(cfg.get("max_output_chars", 50000))
+        self.min_output_chars_by_type = {
+            str(sample_type): int(limit)
+            for sample_type, limit in (cfg.get("min_output_chars_by_type", {}) or {}).items()
+        }
+        self.max_output_chars_by_type = {
+            str(sample_type): int(limit)
+            for sample_type, limit in (cfg.get("max_output_chars_by_type", {}) or {}).items()
+        }
         self.run_php_lint = bool(cfg.get("run_php_lint", False))
         self.php_bin = shutil.which("php") if self.run_php_lint else None
         self.reject_prompt_wrapper_echo = bool(cfg.get("reject_prompt_wrapper_echo", True))
@@ -32,7 +58,24 @@ class QualityGate:
         self.rejected_count = 0
         self.passed_count = 0
         self.reasons: dict[str, int] = {}
+        self.rejections_by_type: dict[str, int] = {}
+        self.rejection_reasons_by_type: dict[str, dict[str, int]] = {}
+        self.passed_output_lengths: list[int] = []
         self.seen_output_hashes: set[str] = set()
+
+    def _effective_min_chars(self, sample_type: str) -> int:
+        return int(self.min_output_chars_by_type.get(sample_type, self.min_output_chars))
+
+    def _effective_max_chars(self, sample_type: str) -> int:
+        return int(self.max_output_chars_by_type.get(sample_type, self.max_output_chars))
+
+    @staticmethod
+    def _allows_procedural_php_without_namespace(source: str) -> bool:
+        source_lower = source.lower()
+        base_name = Path(source_lower).name
+        if source_lower.endswith(PROCEDURAL_EXTENSIONS):
+            return True
+        return base_name in ROOT_PROCEDURAL_PHP
 
     @staticmethod
     def _numeric_line_streak(output: str) -> int:
@@ -96,10 +139,25 @@ class QualityGate:
         output = sample.get("output", "")
         instruction = sample.get("instruction", "")
         instruction_lower = instruction.lower()
+        sample_type = str(sample.get("metadata", {}).get("type", "unknown") or "unknown")
+        source = str(sample.get("metadata", {}).get("source", ""))
 
-        if len(output) < self.min_output_chars:
+        if sample_type == "yaml_reference":
+            if "yaml configuration" not in instruction_lower:
+                return False, "yaml_instruction_output_mismatch"
+            if ":" not in output or "<?php" in output:
+                return False, "yaml_instruction_output_mismatch"
+
+        if sample_type == "doc_summary":
+            if not instruction_lower.startswith("explain the following topic"):
+                return False, "doc_instruction_output_mismatch"
+            alpha_char_count = sum(1 for char in output if char.isalpha())
+            if alpha_char_count < 80:
+                return False, "doc_instruction_output_mismatch"
+
+        if len(output) < self._effective_min_chars(sample_type):
             return False, "too_short"
-        if len(output) > self.max_output_chars:
+        if len(output) > self._effective_max_chars(sample_type):
             return False, "too_long"
         if self.reject_prompt_wrapper_echo and PROMPT_WRAPPER_RE.search(output):
             return False, "prompt_wrapper_echo"
@@ -168,7 +226,12 @@ class QualityGate:
             ):
                 return False, "drupal_7_only"
 
-        if "<?php" in output and "namespace" not in output and "hook_" not in output:
+        if (
+            "<?php" in output
+            and "namespace" not in output
+            and "hook_" not in output
+            and not self._allows_procedural_php_without_namespace(source)
+        ):
             return False, "missing_namespace_in_php"
 
         if not self._php_lint_ok(output):
@@ -187,11 +250,16 @@ class QualityGate:
                     if is_passed:
                         f_out.write(json.dumps(sample, ensure_ascii=True) + "\n")
                         self.passed_count += 1
+                        self.passed_output_lengths.append(len(str(sample.get("output", ""))))
                     else:
                         sample["rejection_reason"] = reason
                         f_rej.write(json.dumps(sample, ensure_ascii=True) + "\n")
                         self.rejected_count += 1
                         self.reasons[reason] = self.reasons.get(reason, 0) + 1
+                        sample_type = str(sample.get("metadata", {}).get("type", "unknown") or "unknown")
+                        self.rejections_by_type[sample_type] = self.rejections_by_type.get(sample_type, 0) + 1
+                        typed_reasons = self.rejection_reasons_by_type.setdefault(sample_type, {})
+                        typed_reasons[reason] = typed_reasons.get(reason, 0) + 1
                 except Exception as exc:
                     self.logger.error(f"Error in quality gate: {str(exc)}")
 
@@ -220,6 +288,14 @@ def run_quality_stage(config: dict, logger: PipelineLogger, root: Path):
         "passed": gate.passed_count,
         "rejected": gate.rejected_count,
         "rejection_reasons": gate.reasons,
+        "rejections_by_type": gate.rejections_by_type,
+        "rejection_reasons_by_type": gate.rejection_reasons_by_type,
+        "output_length_percentiles": {
+            "p50": _percentile(gate.passed_output_lengths, 0.50),
+            "p90": _percentile(gate.passed_output_lengths, 0.90),
+            "p95": _percentile(gate.passed_output_lengths, 0.95),
+            "p99": _percentile(gate.passed_output_lengths, 0.99),
+        },
         "pass_rate": gate.passed_count / (gate.passed_count + gate.rejected_count)
         if (gate.passed_count + gate.rejected_count) > 0
         else 0,

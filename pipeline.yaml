@@ -44,6 +44,7 @@ acquisition:
     max_pages_per_source: 300
     allowed_prefixes:
       drupal_docs:
+        - "https://www.drupal.org/docs"
         - "https://www.drupal.org/docs/develop"
       drupal_api:
         - "https://api.drupal.org/api/drupal"
@@ -67,6 +68,16 @@ quality:
   run_php_lint: true
   min_output_chars: 220
   max_output_chars: 30000
+  min_output_chars_by_type:
+    code_reference: 220
+    yaml_reference: 20
+    twig_reference: 120
+    doc_summary: 180
+  max_output_chars_by_type:
+    code_reference: 24000
+    yaml_reference: 8000
+    twig_reference: 12000
+    doc_summary: 12000
   max_numeric_line_streak: 12
   max_repeated_line_ratio: 0.31
 
@@ -83,6 +94,13 @@ dataset_refinement:
   output_version: "v2"
   seed: 42
   max_output_lines: 300
+  max_output_chars: 6000
+  max_source_share: 0.45
+  chunk_instruction_mode: "metadata_only"
+  weak_category_targets:
+    attributes: 600
+    di: 600
+    sdc: 400
   chunk_overlap_lines: 30
   target_test_ratio: 0.15
   exclude_test_sources_from_training_pool: true
