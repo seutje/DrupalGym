@@ -1,12 +1,15 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pipeline.train import (
     _audit_dataset_artifacts,
     _build_completion_data_collator,
     _build_completion_labels,
+    _missing_quality_tools,
 )
 
 
@@ -100,6 +103,25 @@ class TrainHelpersTest(unittest.TestCase):
         batch = collator(features)
         self.assertEqual(tuple(batch["input_ids"].shape), (2, 16))
         self.assertEqual(batch["labels"][0, -1].item(), -100)
+
+    def test_missing_quality_tools_uses_composer_home_bin_fallback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bin_dir = Path(tmpdir) / "vendor" / "bin"
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            for tool in ("phpcs", "phpstan"):
+                tool_path = bin_dir / tool
+                tool_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                tool_path.chmod(0o755)
+
+            config = {
+                "quality": {"run_phpcs": True, "run_phpstan": True},
+                "evaluation": {"run_phpcs": False, "run_phpstan": False},
+            }
+            with mock.patch.dict(os.environ, {"COMPOSER_HOME": tmpdir}, clear=False):
+                with mock.patch("pipeline.train.shutil.which", return_value=None):
+                    missing = _missing_quality_tools(config)
+
+        self.assertEqual(missing, [])
 
 
 if __name__ == "__main__":

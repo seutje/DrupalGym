@@ -248,6 +248,30 @@ def _count_jsonl_records(path: Path) -> int:
 
 
 def _missing_quality_tools(config: dict) -> list[str]:
+    def _tool_available(tool: str) -> bool:
+        if shutil.which(tool):
+            return True
+
+        candidate_dirs: list[str] = []
+        composer_home = os.environ.get("COMPOSER_HOME", "").strip()
+        if composer_home:
+            candidate_dirs.append(str(Path(composer_home) / "vendor" / "bin"))
+
+        home_candidates = {str(Path.home()), "/root"}
+        for home in home_candidates:
+            candidate_dirs.append(str(Path(home) / ".config" / "composer" / "vendor" / "bin"))
+            candidate_dirs.append(str(Path(home) / ".composer" / "vendor" / "bin"))
+
+        seen: set[str] = set()
+        for directory in candidate_dirs:
+            if not directory or directory in seen:
+                continue
+            seen.add(directory)
+            tool_path = Path(directory) / tool
+            if tool_path.is_file() and os.access(tool_path, os.X_OK):
+                return True
+        return False
+
     required: set[str] = set()
     quality_cfg = config.get("quality", {})
     evaluation_cfg = config.get("evaluation", {})
@@ -259,7 +283,7 @@ def _missing_quality_tools(config: dict) -> list[str]:
     if bool(quality_cfg.get("run_phpstan", False)) or bool(evaluation_cfg.get("run_phpstan", False)):
         required.add("phpstan")
 
-    missing = [tool for tool in sorted(required) if shutil.which(tool) is None]
+    missing = [tool for tool in sorted(required) if not _tool_available(tool)]
     return missing
 
 def train_model(
