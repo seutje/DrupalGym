@@ -52,6 +52,8 @@ class QualityGate:
         self.run_php_lint = bool(cfg.get("run_php_lint", False))
         self.php_bin = shutil.which("php") if self.run_php_lint else None
         self.reject_prompt_wrapper_echo = bool(cfg.get("reject_prompt_wrapper_echo", True))
+        self.reject_path_leakage_tokens = bool(cfg.get("reject_path_leakage_tokens", True))
+        self.path_leakage_tokens = [str(token).lower() for token in cfg.get("path_leakage_tokens", ["repos/"])]
         self.max_numeric_line_streak = int(cfg.get("max_numeric_line_streak", 40))
         self.max_repeated_line_ratio = float(cfg.get("max_repeated_line_ratio", 0.25))
 
@@ -161,6 +163,11 @@ class QualityGate:
             return False, "too_long"
         if self.reject_prompt_wrapper_echo and PROMPT_WRAPPER_RE.search(output):
             return False, "prompt_wrapper_echo"
+        if self.reject_path_leakage_tokens:
+            model_facing_text = "\n".join([instruction, str(sample.get("input", "")), output]).lower()
+            for token in self.path_leakage_tokens:
+                if token and token in model_facing_text:
+                    return False, "path_leakage_token"
 
         numeric_streak = self._numeric_line_streak(output)
         if numeric_streak >= self.max_numeric_line_streak:

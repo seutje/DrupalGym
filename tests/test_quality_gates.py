@@ -117,7 +117,7 @@ class QualityGateHelpersTest(unittest.TestCase):
 
     def test_yaml_uses_type_specific_min_length(self):
         sample = {
-            "instruction": "Provide the Drupal 11 YAML configuration from repos/example/foo.services.yml.",
+            "instruction": "Provide the Drupal 11 YAML configuration from <source_file>.",
             "input": "",
             "output": "a: b\n",
             "metadata": {"source": "repos/example/foo.services.yml", "type": "yaml_reference"},
@@ -128,7 +128,7 @@ class QualityGateHelpersTest(unittest.TestCase):
 
     def test_procedural_php_without_namespace_allowed(self):
         sample = {
-            "instruction": "Show me the implementation of the class Example in the file repos/example/example.module.",
+            "instruction": "Show me the implementation of the class Example in the file <source_file>.",
             "input": "",
             "output": (
                 "<?php\n"
@@ -141,6 +141,22 @@ class QualityGateHelpersTest(unittest.TestCase):
         ok, reason = self.gate.check_sample(sample)
         self.assertTrue(ok)
         self.assertEqual(reason, "")
+
+    def test_path_leakage_in_model_fields_rejected(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/example.module.",
+            "input": "",
+            "output": (
+                "<?php\n"
+                "function example_help(): string {\n"
+                "  return 'Drupal 11 procedural module file output that is long enough.';\n"
+                "}\n"
+            ),
+            "metadata": {"source": "repos/example/example.module", "type": "code_reference"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "path_leakage_token")
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "routing": ["routing", "route", "controller", "path"],
     "sdc": ["component", "twig", "sdc"],
 }
+SOURCE_FILE_PLACEHOLDER = "<source_file>"
 
 
 def _has_predominantly_numeric_fenced_block(output: str) -> bool:
@@ -227,6 +228,7 @@ def _chunk_sample(
 def _build_spec(sample: dict[str, Any], symbol_kind: str, symbol_name: str) -> str:
     output = sample.get("output", "")
     source = str(sample.get("metadata", {}).get("source", ""))
+    source_file = Path(source).name or "unknown.php"
 
     namespace_match = NAMESPACE_RE.search(output)
     namespace_value = namespace_match.group(1).strip() if namespace_match else "Drupal\\Custom"
@@ -236,7 +238,8 @@ def _build_spec(sample: dict[str, Any], symbol_kind: str, symbol_name: str) -> s
     methods = sorted(set(METHOD_RE.findall(output)))[:12]
 
     lines = [
-        f"Source file: {source}",
+        f"Source file: {SOURCE_FILE_PLACEHOLDER}",
+        f"File name hint: {source_file}",
         f"Target symbol: {symbol_kind} {symbol_name}",
         f"Namespace: {namespace_value}",
         "Requirements:",
@@ -273,6 +276,7 @@ def _build_augmented_sample(
 ) -> dict[str, Any]:
     symbol_kind, symbol_name = _detect_symbol_kind_and_name(sample)
     source = str(sample.get("metadata", {}).get("source", ""))
+    source_file = Path(source).name or "unknown.php"
     output = sample.get("output", "")
 
     metadata = copy.deepcopy(sample.get("metadata", {}))
@@ -286,7 +290,8 @@ def _build_augmented_sample(
         )
         input_text = (
             f"Symbol: {symbol_name}\n"
-            f"Source: {source}\n"
+            f"Source file: {SOURCE_FILE_PLACEHOLDER}\n"
+            f"File name hint: {source_file}\n"
             "Broken snippet:\n"
             f"{_mutate_buggy_excerpt(output, excerpt_lines)}"
         )
@@ -297,7 +302,8 @@ def _build_augmented_sample(
         )
         input_text = (
             f"Symbol: {symbol_name}\n"
-            f"Source: {source}\n"
+            f"Source file: {SOURCE_FILE_PLACEHOLDER}\n"
+            f"File name hint: {source_file}\n"
             "Current implementation:\n"
             + "\n".join(output.splitlines()[: max(1, excerpt_lines)])
         )

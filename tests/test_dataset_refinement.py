@@ -1,6 +1,7 @@
 import unittest
 
 from pipeline.dataset_refinement import (
+    _build_augmented_sample,
     _chunk_sample,
     _enforce_source_share_cap,
     _is_augmentation_candidate,
@@ -255,6 +256,22 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         }
         self.assertTrue(_sample_matches_category(sample, "di"))
         self.assertFalse(_sample_matches_category(sample, "sdc"))
+
+    def test_augmented_sample_hides_repo_paths_from_input(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file <source_file>.",
+            "input": "",
+            "output": "<?php\n\nnamespace Drupal\\example;\n\nclass Example {}\n",
+            "metadata": {"source": "repos/example/src/Example.php"},
+        }
+        augmented = _build_augmented_sample(
+            sample,
+            augmentation_type="write_from_spec",
+            excerpt_lines=50,
+            max_output_lines=300,
+        )
+        self.assertNotIn("repos/", augmented["input"])
+        self.assertIn("<source_file>", augmented["input"])
 
 
 if __name__ == "__main__":

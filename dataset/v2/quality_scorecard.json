@@ -13,21 +13,21 @@
   },
   "metrics": {
     "malformed_instruction_class_slot": 0,
-    "yaml_too_short_share": 0.1413,
+    "yaml_too_short_share": 0.0,
     "drupal_core_train_share": 0.45,
-    "train_output_p95": 5204,
+    "train_output_p95": 5184,
     "weak_category_coverage": {
-      "attributes": 3249,
-      "di": 2255,
-      "sdc": 2890
+      "attributes": 3183,
+      "di": 2235,
+      "sdc": 2881
     }
   },
   "checks": {
     "malformed_instruction_class_slot": true,
-    "yaml_too_short_share": false,
+    "yaml_too_short_share": true,
     "drupal_core_train_share": true,
     "train_output_p95": true,
     "weak_category_coverage": true
   },
-  "overall_passed": false
+  "overall_passed": true
 }

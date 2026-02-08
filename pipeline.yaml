@@ -68,9 +68,11 @@ quality:
   run_php_lint: true
   min_output_chars: 220
   max_output_chars: 30000
+  reject_path_leakage_tokens: true
+  path_leakage_tokens: ["repos/"]
   min_output_chars_by_type:
     code_reference: 220
-    yaml_reference: 20
+    yaml_reference: 10
     twig_reference: 120
     doc_summary: 180
   max_output_chars_by_type:

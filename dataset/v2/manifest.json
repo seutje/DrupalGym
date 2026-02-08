@@ -1,87 +1,87 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-08T11:25:51Z",
+  "timestamp": "2026-02-08T11:37:30Z",
   "inputs": [
     {
       "name": "v1_train",
       "version": "v1",
-      "hash": "27321b07b5b841a8bf238645167be4e0e08eeb4a6a031248718e7e9e516b3a39"
+      "hash": "e274986cf431cc6ae20e7df78d45809a19f2c4278bf4564518e009dadf9a5a1d"
     },
     {
       "name": "v1_valid",
       "version": "v1",
-      "hash": "149f05deb2761748a441456f395f1743118abb0103cea840072581560f1c5d14"
+      "hash": "6c4c60cc67bdf5ab65afa000cb8b9eba35d8e4195124b8730b76276ae772e13b"
     },
     {
       "name": "v1_test",
       "version": "v1",
-      "hash": "9f1bf4d81f0df941d4a10a76ba1dcd7adb12db4f87bcef122de841925892cc88"
+      "hash": "d0f4d7cc9ddcda4fd2dfbbec1c28c6e1e3f0a1dc3de984f80079289c5b9ce3b2"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "bce0e8b91996df1fac3134a352e465d5857cc63e521c958d1c10ce79eab572a1"
+      "hash": "f9e54da2777e92569fa2fb8d5f06e6d4eef71bdb0546910787738b8472de3230"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "a3bdd664050b0ac275dbd3dee1bd43cfcae4812c6434c3fb979e77ca722d382d"
+      "hash": "1f563332bda8b6f5b9ce6e72cdfeb6cf0fcac2b65d531300c11d897fd1229766"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "5196ff2ae432ac297d1c027a9bec43d11b9705453579acb8a6bc3ea18a8b3466"
+      "hash": "c56293440b81787d48ab6404267788ea3d408dd14e877676c247800b274113bd"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "77783d36ab2cae9dd4ff03b4c42cbe135ff6eeea00a98554c52e3c3bb3967852"
+      "hash": "145ff865671d8db532e0389ccc5306d67935850ea823a761fbc6619f3e530be5"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
-      "hash": "a9fd9617e9acd826afdf8854a3f5fa1a343cecb63c2f78c77cb78305ab8b8076"
+      "hash": "2953f57e2487dccee56c13a5c3ae0554076d84e09de0a8b0b723d7bdad50fe3b"
     },
     "training_pool_clean": {
       "path": "dataset/v2/training_pool_clean.jsonl",
-      "hash": "38b428424f01764a6f8a63366293b5e691b090d69cfdce525cf943c827f1f60a"
+      "hash": "194cc98fc807287a60d2096345bb08fb68de8d38416b4620203635180b030e98"
     },
     "training_pool_experimental": {
       "path": "dataset/v2/training_pool_experimental.jsonl",
-      "hash": "d048a915a63bad71eb0571e0de581d7ed1a90b792dd32bba01c97d3df8fb3bb4"
+      "hash": "ec9b61d1d3c8efbdc90e2070657d4abf10327d04113752d38cf657a83a01f439"
     },
     "quality_scorecard": {
       "path": "dataset/v2/quality_scorecard.json",
-      "hash": "36a9c068133496f019fdee87f3d141f52fd8ca7cd75c99cedffb8baa5512f8bf"
+      "hash": "f66bb93d846a77a835afa6584ea6ea15e5d82ca94a0d636f9dc5657e3861e052"
     }
   },
   "metrics": {
-    "input_total": 18412,
-    "filtered_total": 18330,
-    "output_char_filtered_total": 15273,
+    "input_total": 18409,
+    "filtered_total": 18327,
+    "output_char_filtered_total": 15272,
     "chunked_source_records": 0,
-    "chunked_total_records": 15249,
+    "chunked_total_records": 15248,
     "rebalanced_total_records": 8771,
     "dropped_test_records": 0,
     "augmented_records": 4005,
     "augmentation_candidate_pool": 5341,
-    "source_share_cap_dropped": 4738,
-    "final_total": 8038,
+    "source_share_cap_dropped": 4742,
+    "final_total": 8034,
     "test_ratio_before_rebalance": 0.4248,
     "test_ratio_after_rebalance": 0.0,
-    "split_train": 6429,
+    "split_train": 6427,
     "split_valid": 803,
-    "split_test": 806,
-    "eval_candidate_pool_size": 6478,
+    "split_test": 804,
+    "eval_candidate_pool_size": 6477,
     "exclude_test_sources_from_training_pool": true,
     "exclude_sources_prefixes": [
       "docs/symfony_com/"
     ],
     "yield_breakdown": {
-      "input_records": 18412,
-      "after_validation_filter": 18330,
-      "after_output_char_filter": 15273,
-      "after_chunking": 15249,
+      "input_records": 18409,
+      "after_validation_filter": 18327,
+      "after_output_char_filter": 15272,
+      "after_chunking": 15248,
       "after_test_pool_extraction": 8771,
-      "after_augmentation": 8038,
-      "rejected_records": 7901
+      "after_augmentation": 8034,
+      "rejected_records": 7903
     },
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
@@ -109,19 +109,19 @@
       ]
     },
     "rejection_reasons": {
-      "trait_enum_mismatch": 1,
-      "interface_class_mismatch": 10,
       "class_interface_mismatch": 52,
+      "interface_class_mismatch": 10,
       "trait_class_mismatch": 10,
+      "trait_enum_mismatch": 1,
       "class_enum_mismatch": 3,
       "truncation_artifact": 3,
       "class_trait_mismatch": 2,
       "interface_enum_mismatch": 1,
-      "max_output_chars": 3057,
+      "max_output_chars": 3055,
       "excluded_source_prefix": 24,
       "augmentation_non_php_source": 3428,
       "augmentation_non_php_output": 2,
-      "source_share_cap_drop": 4738
+      "source_share_cap_drop": 4742
     },
     "sample_type_distribution": {
       "retrieval": 8771,
@@ -135,18 +135,18 @@
     "source_concentration_top10": [
       {
         "source_prefix": "repos/drupal_core",
-        "count": 3617,
+        "count": 3615,
         "share": 0.45
       },
       {
         "source_prefix": "repos/flowdrop",
-        "count": 541,
-        "share": 0.0673
+        "count": 522,
+        "share": 0.065
       },
       {
         "source_prefix": "repos/mcp_tools",
-        "count": 466,
-        "share": 0.058
+        "count": 467,
+        "share": 0.0581
       },
       {
         "source_prefix": "repos/api_normalization",
@@ -155,45 +155,45 @@
       },
       {
         "source_prefix": "repos/display_builder",
-        "count": 297,
-        "share": 0.0369
+        "count": 291,
+        "share": 0.0362
       },
       {
         "source_prefix": "repos/webprofiler",
-        "count": 173,
-        "share": 0.0215
+        "count": 178,
+        "share": 0.0222
       },
       {
         "source_prefix": "docs/www_drupal_org",
         "count": 170,
-        "share": 0.0211
+        "share": 0.0212
       },
       {
         "source_prefix": "repos/eb",
-        "count": 140,
-        "share": 0.0174
+        "count": 148,
+        "share": 0.0184
       },
       {
         "source_prefix": "repos/bootstrap_components",
-        "count": 121,
-        "share": 0.0151
+        "count": 122,
+        "share": 0.0152
       },
       {
-        "source_prefix": "repos/livre",
-        "count": 97,
-        "share": 0.0121
+        "source_prefix": "repos/soap_client",
+        "count": 96,
+        "share": 0.0119
       }
     ],
     "weak_category_coverage": {
-      "attributes": 3249,
-      "di": 2255,
-      "sdc": 2890
+      "attributes": 3183,
+      "di": 2235,
+      "sdc": 2881
     },
     "train_output_percentiles": {
-      "p50": 1669,
-      "p90": 4443,
-      "p95": 5204,
-      "p99": 5835
+      "p50": 1631,
+      "p90": 4488,
+      "p95": 5184,
+      "p99": 5877
     },
     "quality_scorecard": {
       "dataset_version": "v2",
@@ -210,23 +210,23 @@
       },
       "metrics": {
         "malformed_instruction_class_slot": 0,
-        "yaml_too_short_share": 0.1413,
+        "yaml_too_short_share": 0.0,
         "drupal_core_train_share": 0.45,
-        "train_output_p95": 5204,
+        "train_output_p95": 5184,
         "weak_category_coverage": {
-          "attributes": 3249,
-          "di": 2255,
-          "sdc": 2890
+          "attributes": 3183,
+          "di": 2235,
+          "sdc": 2881
         }
       },
       "checks": {
         "malformed_instruction_class_slot": true,
-        "yaml_too_short_share": false,
+        "yaml_too_short_share": true,
         "drupal_core_train_share": true,
         "train_output_p95": true,
         "weak_category_coverage": true
       },
-      "overall_passed": false
+      "overall_passed": true
     }
   },
   "config": {

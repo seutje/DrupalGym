@@ -26,6 +26,8 @@ class SftGenerationHelpersTest(unittest.TestCase):
         self.assertEqual(sample["metadata"]["symbol_name"], "EntityDescriptionInterface")
         self.assertEqual(sample["metadata"]["symbol_extraction_method"], "declaration")
         self.assertIn("interface EntityDescriptionInterface", sample["instruction"])
+        self.assertNotIn("repos/", sample["instruction"])
+        self.assertIn("<source_file>", sample["instruction"])
 
     def test_multiple_declarations_use_path_fallback(self):
         content = (
@@ -38,6 +40,8 @@ class SftGenerationHelpersTest(unittest.TestCase):
         self.assertEqual(sample["metadata"]["symbol_extraction_method"], "path_fallback")
         self.assertEqual(sample["metadata"]["symbol_name"], "MultiThing")
         self.assertIn("class MultiThing", sample["instruction"])
+        self.assertNotIn("repos/", sample["instruction"])
+        self.assertIn("<source_file>", sample["instruction"])
 
     def test_yaml_instruction_is_retrieval_only(self):
         content = "services:\n  gym.logger: {}\n"
@@ -45,8 +49,9 @@ class SftGenerationHelpersTest(unittest.TestCase):
         sample = self.generator.samples[0]
         self.assertEqual(
             sample["instruction"],
-            "Provide the Drupal 11 YAML configuration from repos/example/gym.services.yml.",
+            "Provide the Drupal 11 YAML configuration from <source_file>.",
         )
+        self.assertNotIn("repos/", sample["instruction"])
         self.assertNotIn("explain what it defines", sample["instruction"].lower())
 
 

@@ -12,6 +12,7 @@ DECLARATION_RE = re.compile(
 )
 PHP_COMMENT_RE = re.compile(r"/\*.*?\*/|//[^\n]*|#(?!\[)[^\n]*", re.DOTALL)
 VALID_SYMBOL_RE = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
+SOURCE_FILE_PLACEHOLDER = "<source_file>"
 
 
 class InstructionGenerator:
@@ -71,10 +72,10 @@ class InstructionGenerator:
 
         if self.enable_symbol_kind_prompts:
             instruction = (
-                f"Show me the implementation of the {symbol_kind} {symbol_name} in the file {rel_path}."
+                f"Show me the implementation of the {symbol_kind} {symbol_name} in the file {SOURCE_FILE_PLACEHOLDER}."
             )
         else:
-            instruction = f"Show me the implementation of the class {symbol_name} in the file {rel_path}."
+            instruction = f"Show me the implementation of the class {symbol_name} in the file {SOURCE_FILE_PLACEHOLDER}."
 
         self._append(
             {
@@ -93,7 +94,7 @@ class InstructionGenerator:
 
     def generate_from_yaml(self, content: str, rel_path: str):
         stem = Path(rel_path).stem.replace("_", " ")
-        instruction = f"Provide the Drupal 11 YAML configuration from {rel_path}."
+        instruction = f"Provide the Drupal 11 YAML configuration from {SOURCE_FILE_PLACEHOLDER}."
         self._append(
             {
                 "instruction": instruction,
@@ -108,7 +109,7 @@ class InstructionGenerator:
         )
 
     def generate_from_twig(self, content: str, rel_path: str):
-        instruction = f"Show the Twig template implementation in {rel_path} for Drupal 11 theming."
+        instruction = f"Show the Twig template implementation in {SOURCE_FILE_PLACEHOLDER} for Drupal 11 theming."
         self._append(
             {
                 "instruction": instruction,
