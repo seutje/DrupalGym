@@ -42,6 +42,7 @@ NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 PHPSTAN_SYNTAX_ERROR_RE = re.compile(r"(syntax error|parse error)", re.IGNORECASE)
 SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
 FENCED_CODE_BLOCK_RE = re.compile(r"```([A-Za-z0-9_+-]*)\n(.*?)```", re.DOTALL)
+PROMPTS_REQUIRING_PHP_SNIPPET = {"block_attribute", "service_di", "routing_yaml"}
 
 
 def _iso_timestamp() -> str:
@@ -291,6 +292,22 @@ def _required_checks_for_prompt(prompt_id: str, output: str) -> tuple[dict[str, 
         required = ["non_empty_output"]
 
     return checks, required
+
+
+def _apply_external_required_checks(
+    prompt_id: str,
+    checks: dict[str, bool],
+    required: list[str],
+    external_checks: dict[str, Any],
+) -> tuple[dict[str, bool], list[str]]:
+    updated_checks = dict(checks)
+    updated_required = list(required)
+    if prompt_id in PROMPTS_REQUIRING_PHP_SNIPPET:
+        has_php_snippet = int(external_checks.get("php_checked_count", 0)) > 0
+        updated_checks["has_php_snippet"] = has_php_snippet
+        if "has_php_snippet" not in updated_required:
+            updated_required.append("has_php_snippet")
+    return updated_checks, updated_required
 
 
 def _write_temp_php(snippet: str) -> Path:
@@ -912,6 +929,12 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
 
                     checks, required = _required_checks_for_prompt(prompt_id, output)
                     external_checks = _run_external_checks(output, eval_cfg)
+                    checks, required = _apply_external_required_checks(
+                        prompt_id=prompt_id,
+                        checks=checks,
+                        required=required,
+                        external_checks=external_checks,
+                    )
                     format_sanity = _compute_format_sanity(output)
                     score = _score_result(checks, required, external_checks)
 

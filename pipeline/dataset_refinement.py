@@ -21,6 +21,9 @@ PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
 SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
+CLASS_DECL_RE = re.compile(r"\bclass\s+[A-Za-z_][A-Za-z0-9_]*")
+FUNCTION_DECL_RE = re.compile(r"\bfunction\s+[A-Za-z_][A-Za-z0-9_]*\s*\(")
+REQUESTED_PATH_RE = re.compile(r"['\"](/[^'\"]+)['\"]")
 MAX_NUMERIC_LINE_STREAK = 12
 DEFAULT_MAX_REPEATED_LINE_RATIO = 0.31
 DEFAULT_WEAK_CATEGORY_PATTERNS: dict[str, list[str]] = {
@@ -481,6 +484,10 @@ def _validate_sample(
     if stripped.endswith(("Input:", "Output:", "Instruction:")):
         return False, "truncation_artifact"
 
+    task_ok, task_reason = _validate_structured_task_output(sample)
+    if not task_ok:
+        return False, task_reason
+
     if enforce_modern_drupal_patterns:
         sample_type = str(sample.get("metadata", {}).get("type", "")).strip() or _sample_type(sample)
         relevant_types = modern_drupal_relevant_types or set(DEFAULT_MODERN_DRUPAL_RELEVANT_TYPES)
@@ -503,6 +510,53 @@ def _validate_sample(
             )
             if not matched:
                 return False, "missing_drupal11_attribute_or_di_pattern"
+
+    return True, ""
+
+
+def _instruction_requests_service_di_pair(instruction_lower: str) -> bool:
+    has_services_file = "services.yml" in instruction_lower
+    requests_di = "constructor injection" in instruction_lower or "dependency injection" in instruction_lower
+    requests_class_impl = "class implementation" in instruction_lower
+    requests_logger_factory = "logger.factory" in instruction_lower
+    return has_services_file and (requests_di or requests_class_impl or requests_logger_factory)
+
+
+def _instruction_requests_routing_controller_pair(instruction_lower: str) -> bool:
+    has_routing_file = "routing.yml" in instruction_lower
+    requests_controller = "controller method" in instruction_lower or "matching controller" in instruction_lower
+    return has_routing_file and requests_controller
+
+
+def _validate_structured_task_output(sample: dict[str, Any]) -> tuple[bool, str]:
+    instruction_lower = str(sample.get("instruction", "")).strip().lower()
+    output = str(sample.get("output", ""))
+    output_lower = output.lower()
+
+    if _instruction_requests_service_di_pair(instruction_lower):
+        if "services:" not in output_lower:
+            return False, "service_di_missing_services_yaml"
+        if "logger.factory" in instruction_lower and "logger.factory" not in output_lower:
+            return False, "service_di_missing_logger_factory"
+        if "<?php" not in output:
+            return False, "service_di_missing_php_snippet"
+        if not CLASS_DECL_RE.search(output):
+            return False, "service_di_missing_php_class"
+        if "__construct(" not in output and "static function create(" not in output_lower:
+            return False, "service_di_missing_constructor_injection"
+
+    if _instruction_requests_routing_controller_pair(instruction_lower):
+        if "path:" not in output_lower or "_controller" not in output_lower:
+            return False, "routing_missing_yaml_route"
+        requested_paths = [match.group(1).strip().lower() for match in REQUESTED_PATH_RE.finditer(str(sample.get("instruction", "")))]
+        if requested_paths and not all(path in output_lower for path in requested_paths):
+            return False, "routing_missing_requested_path"
+        if "<?php" not in output:
+            return False, "routing_missing_php_snippet"
+        if not CLASS_DECL_RE.search(output):
+            return False, "routing_missing_php_class"
+        if not FUNCTION_DECL_RE.search(output):
+            return False, "routing_missing_php_method"
 
     return True, ""
 
@@ -993,6 +1047,7 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
         "weak_category_targets": {
             "attributes": 600,
             "di": 600,
+            "routing": 450,
             "sdc": 400,
             "twig": 400,
         },
@@ -1431,6 +1486,24 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
     ambiguity = _ambiguity_metrics(final_records)
     normalized_output_duplicate_ratio_after = _normalized_output_duplicate_ratio(final_records)
     empty_input_share_by_type = _empty_input_share_by_type(final_records)
+    final_artifact_counts = {
+        "prompt_wrapper_echo": 0,
+        "special_token_artifact": 0,
+        "numeric_line_streak_artifact": 0,
+        "repetitive_output_artifact": 0,
+        "numeric_code_block_artifact": 0,
+    }
+    for sample in final_records:
+        output = str(sample.get("output", ""))
+        if PROMPT_WRAPPER_RE.search(output):
+            final_artifact_counts["prompt_wrapper_echo"] += 1
+        artifact_reason = _artifact_rejection_reason(
+            output,
+            max_numeric_line_streak=MAX_NUMERIC_LINE_STREAK,
+            max_repeated_line_ratio=max_repeated_line_ratio,
+        )
+        if artifact_reason in final_artifact_counts:
+            final_artifact_counts[artifact_reason] += 1
 
     malformed_instruction_count = int(rejection_reasons.get("malformed_instruction_class_slot", 0))
     quality_scorecard = {
@@ -1446,6 +1519,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
                 sample_type: 0.01
                 for sample_type in require_context_for_types_ordered
             },
+            "final_artifact_count_max": 0,
             "weak_category_targets": weak_category_targets,
         },
         "metrics": {
@@ -1456,6 +1530,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             "ambiguous_pair_ratio": float(ambiguity["ambiguous_pair_ratio"]),
             "normalized_output_duplicate_ratio": normalized_output_duplicate_ratio_after,
             "empty_input_share_by_type": empty_input_share_by_type,
+            "final_artifact_counts": final_artifact_counts,
             "weak_category_coverage": weak_category_coverage,
             "strict_weak_category_coverage": weak_category_coverage,
         },
@@ -1473,6 +1548,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         )
         if require_context_for_types
         else True,
+        "final_artifact_counts": all(value <= 0 for value in final_artifact_counts.values()),
         "weak_category_coverage": all(
             weak_category_coverage.get(category, 0) >= target for category, target in weak_category_targets.items()
         )

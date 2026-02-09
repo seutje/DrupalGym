@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pipeline.evaluation import (
+    _apply_external_required_checks,
     _build_generation_kwargs,
     _compute_format_sanity,
     _extract_code_blocks,
@@ -183,6 +184,30 @@ class EvaluationHelpersTest(unittest.TestCase):
         )
         checks, required = _required_checks_for_prompt("block_attribute", output)
         self.assertTrue(all(checks[name] for name in required))
+
+    def test_apply_external_required_checks_requires_php_snippet_for_service_di(self):
+        checks = {"non_empty_output": True}
+        required = ["non_empty_output"]
+        updated_checks, updated_required = _apply_external_required_checks(
+            prompt_id="service_di",
+            checks=checks,
+            required=required,
+            external_checks={"php_checked_count": 0},
+        )
+        self.assertIn("has_php_snippet", updated_required)
+        self.assertFalse(updated_checks["has_php_snippet"])
+
+    def test_apply_external_required_checks_passes_with_php_snippet(self):
+        checks = {"non_empty_output": True}
+        required = ["non_empty_output"]
+        updated_checks, updated_required = _apply_external_required_checks(
+            prompt_id="routing_yaml",
+            checks=checks,
+            required=required,
+            external_checks={"php_checked_count": 1},
+        )
+        self.assertIn("has_php_snippet", updated_required)
+        self.assertTrue(updated_checks["has_php_snippet"])
 
     def test_score_result_penalizes_failed_php_lint(self):
         required_checks = {

@@ -243,6 +243,49 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         self.assertFalse(passed)
         self.assertEqual(reason, "numeric_code_block_artifact")
 
+    def test_validate_rejects_service_di_task_without_php_class(self):
+        sample = {
+            "instruction": "Define a Drupal 11 service in gym.services.yml and its class implementation using constructor injection for the logger.factory service.",
+            "input": "",
+            "output": "services:\n  gym.foo:\n    class: Drupal\\gym\\Service\\FooService\n    arguments: ['@logger.factory']\n",
+            "metadata": {"source": "docs/www_drupal_org/docs/develop/services.md", "type": "doc_summary"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "service_di_missing_php_snippet")
+
+    def test_validate_rejects_routing_task_without_php_controller(self):
+        sample = {
+            "instruction": "Create a Drupal 11 gym.routing.yml route and a matching controller method for the path '/gym/stats'.",
+            "input": "",
+            "output": "gym.stats:\n  path: '/gym/stats'\n  defaults:\n    _controller: '\\\\Drupal\\\\gym\\\\Controller\\\\GymController::statsPage'\n",
+            "metadata": {"source": "docs/www_drupal_org/docs/develop/routing.md", "type": "doc_summary"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "routing_missing_php_snippet")
+
+    def test_validate_accepts_structured_service_di_task(self):
+        sample = {
+            "instruction": "Define a Drupal 11 service in gym.services.yml and its class implementation using constructor injection for the logger.factory service.",
+            "input": "",
+            "output": (
+                "services:\n"
+                "  gym.foo:\n"
+                "    class: Drupal\\\\gym\\\\Service\\\\FooService\n"
+                "    arguments: ['@logger.factory']\n\n"
+                "<?php\n"
+                "namespace Drupal\\\\gym\\\\Service;\n"
+                "final class FooService {\n"
+                "  public function __construct(private readonly object $loggerFactory) {}\n"
+                "}\n"
+            ),
+            "metadata": {"source": "docs/www_drupal_org/docs/develop/services.md", "type": "doc_summary"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertTrue(passed)
+        self.assertEqual(reason, "")
+
     def test_source_prefix_match(self):
         sample = {
             "instruction": "Explain",

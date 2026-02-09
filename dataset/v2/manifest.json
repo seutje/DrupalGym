@@ -1,6 +1,6 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-09T06:17:27Z",
+  "timestamp": "2026-02-09T15:05:53Z",
   "inputs": [
     {
       "name": "v1_train",
@@ -49,7 +49,7 @@
     },
     "quality_scorecard": {
       "path": "dataset/v2/quality_scorecard.json",
-      "hash": "7bb25fc1497792592fb68acd999daec8829e244d643b75342d3f9f4d539d90f2"
+      "hash": "b7736caac353a84ca3a82faf5fbeb1c56542bd94fecd98994475e6f8ff5e4ac6"
     }
   },
   "metrics": {
@@ -103,19 +103,13 @@
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
       "weak_categories": [
-        "attributes",
-        "sdc"
+        "routing"
       ],
       "details": [
         {
-          "category": "attributes",
+          "category": "routing",
           "negative_prompt_count": 1,
-          "avg_delta": -0.28
-        },
-        {
-          "category": "sdc",
-          "negative_prompt_count": 1,
-          "avg_delta": -0.0333
+          "avg_delta": -0.2
         }
       ]
     },
@@ -196,12 +190,14 @@
     "weak_category_coverage": {
       "attributes": 3007,
       "di": 746,
+      "routing": 338,
       "sdc": 203,
       "twig": 618
     },
     "strict_weak_category_coverage": {
       "attributes": 3007,
       "di": 746,
+      "routing": 338,
       "sdc": 203,
       "twig": 618
     },
@@ -226,9 +222,11 @@
           "twig_reference": 0.01,
           "yaml_reference": 0.01
         },
+        "final_artifact_count_max": 0,
         "weak_category_targets": {
           "attributes": 600,
           "di": 600,
+          "routing": 300,
           "sdc": 200,
           "twig": 450
         }
@@ -247,15 +245,24 @@
           "doc_summary": 0.0,
           "sdc_reference": 0.0
         },
+        "final_artifact_counts": {
+          "prompt_wrapper_echo": 0,
+          "special_token_artifact": 0,
+          "numeric_line_streak_artifact": 0,
+          "repetitive_output_artifact": 0,
+          "numeric_code_block_artifact": 0
+        },
         "weak_category_coverage": {
           "attributes": 3007,
           "di": 746,
+          "routing": 338,
           "sdc": 203,
           "twig": 618
         },
         "strict_weak_category_coverage": {
           "attributes": 3007,
           "di": 746,
+          "routing": 338,
           "sdc": 203,
           "twig": 618
         }
@@ -268,6 +275,7 @@
         "ambiguous_pair_ratio": true,
         "normalized_output_duplicate_ratio": true,
         "empty_input_share_by_type": true,
+        "final_artifact_counts": true,
         "weak_category_coverage": true
       },
       "overall_passed": true
@@ -295,6 +303,7 @@
     "weak_category_targets": {
       "attributes": 600,
       "di": 600,
+      "routing": 300,
       "sdc": 200,
       "twig": 450
     },

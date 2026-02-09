@@ -201,6 +201,7 @@ dataset_refinement:
   weak_category_targets:
     attributes: 600
     di: 600
+    routing: 300
     sdc: 200
     twig: 450
   enforce_modern_drupal_patterns: true

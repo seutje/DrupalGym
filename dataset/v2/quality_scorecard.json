@@ -13,9 +13,11 @@
       "twig_reference": 0.01,
       "yaml_reference": 0.01
     },
+    "final_artifact_count_max": 0,
     "weak_category_targets": {
       "attributes": 600,
       "di": 600,
+      "routing": 300,
       "sdc": 200,
       "twig": 450
     }
@@ -34,15 +36,24 @@
       "doc_summary": 0.0,
       "sdc_reference": 0.0
     },
+    "final_artifact_counts": {
+      "prompt_wrapper_echo": 0,
+      "special_token_artifact": 0,
+      "numeric_line_streak_artifact": 0,
+      "repetitive_output_artifact": 0,
+      "numeric_code_block_artifact": 0
+    },
     "weak_category_coverage": {
       "attributes": 3007,
       "di": 746,
+      "routing": 338,
       "sdc": 203,
       "twig": 618
     },
     "strict_weak_category_coverage": {
       "attributes": 3007,
       "di": 746,
+      "routing": 338,
       "sdc": 203,
       "twig": 618
     }
@@ -55,6 +66,7 @@
     "ambiguous_pair_ratio": true,
     "normalized_output_duplicate_ratio": true,
     "empty_input_share_by_type": true,
+    "final_artifact_counts": true,
     "weak_category_coverage": true
   },
   "overall_passed": true
