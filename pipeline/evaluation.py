@@ -41,6 +41,7 @@ PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 PHPSTAN_SYNTAX_ERROR_RE = re.compile(r"(syntax error|parse error)", re.IGNORECASE)
 SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
+FENCED_CODE_BLOCK_RE = re.compile(r"```([A-Za-z0-9_+-]*)\n(.*?)```", re.DOTALL)
 
 
 def _iso_timestamp() -> str:
@@ -64,6 +65,7 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
         "run_phpstan": False,
         "phpstan_failure_mode": "syntax_only",
         "max_code_checks_per_response": 3,
+        "php_snippet_policy": "php_only",
         "repetition_penalty": 1.0,
         "no_repeat_ngram_size": 0,
         "prompt_suite": DEFAULT_PROMPT_SUITE,
@@ -77,6 +79,7 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
     merged["max_code_checks_per_response"] = int(
         merged.get("max_code_checks_per_response", defaults["max_code_checks_per_response"])
     )
+    merged["php_snippet_policy"] = _read_php_snippet_policy(merged)
     merged["repetition_penalty"] = float(merged.get("repetition_penalty", defaults["repetition_penalty"]))
     merged["no_repeat_ngram_size"] = int(merged.get("no_repeat_ngram_size", defaults["no_repeat_ngram_size"]))
     return merged
@@ -143,13 +146,64 @@ def _generate_response(model, tokenizer, instruction: str, input_text: str, max_
 
 
 def _extract_code_blocks(output: str) -> list[str]:
-    block_pattern = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
-    blocks = [match.group(1).strip() for match in block_pattern.finditer(output)]
+    blocks = [block["code"] for block in _extract_fenced_code_blocks(output)]
     if blocks:
         return blocks
     if "<?php" in output:
         return [output.strip()]
     return []
+
+
+def _extract_fenced_code_blocks(output: str) -> list[dict[str, str]]:
+    blocks: list[dict[str, str]] = []
+    for match in FENCED_CODE_BLOCK_RE.finditer(output):
+        code = match.group(2).strip()
+        if not code:
+            continue
+        blocks.append(
+            {
+                "language": (match.group(1) or "").strip().lower(),
+                "code": code,
+            }
+        )
+    return blocks
+
+
+def _read_php_snippet_policy(config: dict[str, Any]) -> str:
+    policy = str(config.get("php_snippet_policy", "php_only")).strip().lower()
+    return policy if policy in {"php_only", "all_fences"} else "php_only"
+
+
+def _select_snippets_for_checks(output: str, eval_cfg: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
+    max_snippets = max(1, int(eval_cfg.get("max_code_checks_per_response", 3)))
+    policy = _read_php_snippet_policy(eval_cfg)
+    blocks = _extract_fenced_code_blocks(output)
+    all_codes = [block["code"] for block in blocks]
+
+    if policy == "all_fences":
+        candidates = list(all_codes)
+    else:
+        candidates = []
+        for block in blocks:
+            language = block["language"]
+            code = block["code"]
+            if language in {"php", "phtml"}:
+                candidates.append(code)
+                continue
+            if not language and "<?php" in code:
+                candidates.append(code)
+
+    if not candidates and "<?php" in output:
+        candidates = [output.strip()]
+
+    selected = candidates[:max_snippets]
+    metadata = {
+        "code_block_count": len(all_codes),
+        "php_candidate_count": len(candidates),
+        "php_checked_count": len(selected),
+        "php_selection_policy": policy,
+    }
+    return selected, metadata
 
 
 def _compute_format_sanity(output: str) -> dict[str, Any]:
@@ -430,12 +484,13 @@ def _run_phpstan(snippets: list[str], failure_mode: str = "syntax_only") -> dict
 
 
 def _run_external_checks(output: str, eval_cfg: dict[str, Any]) -> dict[str, Any]:
-    snippets = _extract_code_blocks(output)
-    max_snippets = max(1, int(eval_cfg.get("max_code_checks_per_response", 3)))
-    snippets = snippets[:max_snippets]
+    snippets, snippet_meta = _select_snippets_for_checks(output, eval_cfg)
 
     external = {
-        "code_block_count": len(snippets),
+        "code_block_count": int(snippet_meta.get("code_block_count", 0)),
+        "php_candidate_count": int(snippet_meta.get("php_candidate_count", 0)),
+        "php_checked_count": int(snippet_meta.get("php_checked_count", 0)),
+        "php_selection_policy": str(snippet_meta.get("php_selection_policy", _read_php_snippet_policy(eval_cfg))),
         "php_lint": {
             "enabled": bool(eval_cfg.get("run_php_lint", True)),
             "available": False,
@@ -660,6 +715,12 @@ def _adapter_subdir_for_mode(mode: str) -> str:
     return "final" if mode in {"full_scale", "final"} else "test_run"
 
 
+def _reset_sample_outputs_dir(sample_outputs_dir: Path) -> None:
+    if sample_outputs_dir.exists():
+        shutil.rmtree(sample_outputs_dir)
+    sample_outputs_dir.mkdir(parents=True, exist_ok=True)
+
+
 def _load_model_for_evaluation(
     *,
     model_name: str,
@@ -737,7 +798,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
     eval_dir = root / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
     sample_outputs_dir = eval_dir / "sample_outputs"
-    sample_outputs_dir.mkdir(parents=True, exist_ok=True)
+    _reset_sample_outputs_dir(sample_outputs_dir)
 
     manifest = Manifest("evaluation", eval_dir)
     manifest.data["config"] = eval_cfg

@@ -266,13 +266,14 @@ training:
     max_seq_len: 2048
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
-    max_steps: 100
+    max_steps: 300
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
     gradient_accumulation_steps: 16
     learning_rate: 0.0002
     logging_steps: 5
-    eval_strategy: "no"
+    eval_strategy: "steps"
+    eval_steps: 50
     save_strategy: "no"
     fp16: false
     bf16: false
@@ -290,7 +291,7 @@ training:
         base_model: "Qwen/Qwen2.5-Coder-3B"
         training_type: "QLoRA"
   full_scale:
-    min_train_samples: 7000
+    min_train_samples: 5000
     preferred_train_samples: 20000
     require_quality_tooling: true
     max_seq_len: 2048
@@ -335,6 +336,7 @@ evaluation:
   run_phpstan: true
   phpstan_failure_mode: "syntax_only"
   max_code_checks_per_response: 3
+  php_snippet_policy: "php_only" # "php_only" (default) or "all_fences" for legacy behavior
   repetition_penalty: 1.1
   no_repeat_ngram_size: 4
 

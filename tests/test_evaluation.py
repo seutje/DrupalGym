@@ -1,13 +1,18 @@
 import unittest
+import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from pipeline.evaluation import (
     _build_generation_kwargs,
     _compute_format_sanity,
     _extract_code_blocks,
     _load_model_for_evaluation,
+    _reset_sample_outputs_dir,
     _required_checks_for_prompt,
+    _run_external_checks,
     _score_result,
+    _select_snippets_for_checks,
     summarize_results,
 )
 
@@ -38,6 +43,137 @@ class EvaluationHelpersTest(unittest.TestCase):
         self.assertEqual(len(blocks), 2)
         self.assertIn("class A", blocks[0])
         self.assertIn("services:", blocks[1])
+
+    def test_select_snippets_php_only_ignores_non_php_fences(self):
+        text = (
+            "```yaml\nservices:\n  gym.service: {}\n```\n"
+            "```twig\n<div>{{ content }}</div>\n```\n"
+            "```php\n<?php\nfinal class GymBlock {}\n```\n"
+        )
+        snippets, metadata = _select_snippets_for_checks(
+            text,
+            {"php_snippet_policy": "php_only", "max_code_checks_per_response": 5},
+        )
+        self.assertEqual(metadata["php_selection_policy"], "php_only")
+        self.assertEqual(metadata["code_block_count"], 3)
+        self.assertEqual(metadata["php_candidate_count"], 1)
+        self.assertEqual(metadata["php_checked_count"], 1)
+        self.assertEqual(len(snippets), 1)
+        self.assertIn("final class GymBlock", snippets[0])
+
+    def test_select_snippets_php_only_accepts_unlabeled_fence_with_php_tag(self):
+        text = "```\n<?php\necho 'hello';\n```\n"
+        snippets, metadata = _select_snippets_for_checks(
+            text,
+            {"php_snippet_policy": "php_only", "max_code_checks_per_response": 5},
+        )
+        self.assertEqual(metadata["php_candidate_count"], 1)
+        self.assertEqual(metadata["php_checked_count"], 1)
+        self.assertEqual(len(snippets), 1)
+        self.assertTrue(snippets[0].lstrip().startswith("<?php"))
+
+    def test_select_snippets_all_fences_keeps_legacy_behavior(self):
+        text = (
+            "```yaml\nservices:\n  gym.service: {}\n```\n"
+            "```php\n<?php\necho 'ok';\n```\n"
+        )
+        snippets, metadata = _select_snippets_for_checks(
+            text,
+            {"php_snippet_policy": "all_fences", "max_code_checks_per_response": 5},
+        )
+        self.assertEqual(metadata["php_selection_policy"], "all_fences")
+        self.assertEqual(metadata["code_block_count"], 2)
+        self.assertEqual(metadata["php_candidate_count"], 2)
+        self.assertEqual(metadata["php_checked_count"], 2)
+        self.assertEqual(len(snippets), 2)
+
+    def test_select_snippets_php_only_falls_back_to_inline_php_without_fences(self):
+        text = "<?php\nfinal class InlineOnly {}\n"
+        snippets, metadata = _select_snippets_for_checks(
+            text,
+            {"php_snippet_policy": "php_only", "max_code_checks_per_response": 5},
+        )
+        self.assertEqual(metadata["code_block_count"], 0)
+        self.assertEqual(metadata["php_candidate_count"], 1)
+        self.assertEqual(metadata["php_checked_count"], 1)
+        self.assertEqual(len(snippets), 1)
+        self.assertIn("InlineOnly", snippets[0])
+
+    def test_run_external_checks_php_only_skips_when_no_php_snippets(self):
+        output = (
+            "```yaml\nservices:\n  gym.service: {}\n```\n"
+            "```twig\n<div>{{ content }}</div>\n```\n"
+        )
+
+        def _lint_summary(snippets):
+            return {
+                "enabled": True,
+                "available": True,
+                "checked": len(snippets),
+                "passed": len(snippets),
+                "failed": 0,
+                "errors": [],
+            }
+
+        def _phpcs_summary(snippets):
+            return {
+                "enabled": True,
+                "available": True,
+                "drupal_standard_available": True,
+                "runtime_broken": False,
+                "checked": len(snippets),
+                "passed": len(snippets),
+                "failed": 0,
+                "errors": [],
+            }
+
+        def _phpstan_summary(snippets, failure_mode="syntax_only"):
+            return {
+                "enabled": True,
+                "available": True,
+                "failure_mode": failure_mode,
+                "checked": len(snippets),
+                "passed": len(snippets),
+                "failed": 0,
+                "syntax_errors": 0,
+                "errors": [],
+            }
+
+        with (
+            patch("pipeline.evaluation._run_php_lint", side_effect=_lint_summary),
+            patch("pipeline.evaluation._run_phpcs", side_effect=_phpcs_summary),
+            patch("pipeline.evaluation._run_phpstan", side_effect=_phpstan_summary),
+        ):
+            external = _run_external_checks(
+                output,
+                {
+                    "run_php_lint": True,
+                    "run_phpcs": True,
+                    "run_phpstan": True,
+                    "phpstan_failure_mode": "syntax_only",
+                    "php_snippet_policy": "php_only",
+                    "max_code_checks_per_response": 5,
+                },
+            )
+
+        self.assertEqual(external["code_block_count"], 2)
+        self.assertEqual(external["php_candidate_count"], 0)
+        self.assertEqual(external["php_checked_count"], 0)
+        self.assertEqual(external["php_lint"]["checked"], 0)
+        self.assertEqual(external["phpcs"]["checked"], 0)
+        self.assertEqual(external["phpstan"]["checked"], 0)
+
+    def test_reset_sample_outputs_dir_removes_stale_files(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sample_outputs_dir = Path(tmp_dir) / "sample_outputs"
+            stale_dir = sample_outputs_dir / "old_model"
+            stale_dir.mkdir(parents=True)
+            (stale_dir / "stale.txt").write_text("stale", encoding="utf-8")
+
+            _reset_sample_outputs_dir(sample_outputs_dir)
+
+            self.assertTrue(sample_outputs_dir.exists())
+            self.assertEqual(list(sample_outputs_dir.iterdir()), [])
 
     def test_required_checks_block_attribute(self):
         output = (
