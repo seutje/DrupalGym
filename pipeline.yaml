@@ -367,7 +367,7 @@ training:
     max_seq_len: 2048
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
-    max_steps: 300
+    max_steps: 450
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
     gradient_accumulation_steps: 16
@@ -375,7 +375,9 @@ training:
     logging_steps: 5
     eval_strategy: "steps"
     eval_steps: 50
-    save_strategy: "no"
+    save_strategy: "steps"
+    save_steps: 50
+    warmup_ratio: 0.1
     fp16: false
     bf16: false
     gradient_checkpointing: true
