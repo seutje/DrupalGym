@@ -104,6 +104,21 @@ class QualityGateHelpersTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "numeric_code_block_artifact")
 
+    def test_special_token_artifact_rejected(self):
+        sample = {
+            "instruction": "Explain the following topic based on Drupal 11 documentation: Components",
+            "input": "",
+            "output": (
+                "This output looks valid but leaks a generation artifact token.\n"
+                "<|fim_middle|>\n"
+                "That token should be rejected by the quality gate.\n"
+            ),
+            "metadata": {"source": "doc.md"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "special_token_artifact")
+
     def test_yaml_instruction_output_mismatch_rejected(self):
         sample = {
             "instruction": "Explain this file.",

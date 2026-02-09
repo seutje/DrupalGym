@@ -16,35 +16,35 @@
     "weak_category_targets": {
       "attributes": 600,
       "di": 600,
-      "sdc": 240,
+      "sdc": 200,
       "twig": 450
     }
   },
   "metrics": {
     "malformed_instruction_class_slot": 0,
     "yaml_too_short_share": 0.0,
-    "drupal_core_train_share": 0.8999,
-    "train_output_p95": 5987,
+    "drupal_core_train_share": 0.8728,
+    "train_output_p95": 6000,
     "ambiguous_pair_ratio": 0.0,
     "normalized_output_duplicate_ratio": 0.0,
     "empty_input_share_by_type": {
-      "code_reference": 0.0,
       "yaml_reference": 0.0,
-      "sdc_reference": 0.0,
+      "code_reference": 0.0,
       "twig_reference": 0.0,
-      "doc_summary": 0.0
+      "doc_summary": 0.0,
+      "sdc_reference": 0.0
     },
     "weak_category_coverage": {
-      "attributes": 3914,
-      "di": 782,
-      "sdc": 240,
-      "twig": 724
+      "attributes": 3007,
+      "di": 746,
+      "sdc": 203,
+      "twig": 618
     },
     "strict_weak_category_coverage": {
-      "attributes": 3914,
-      "di": 782,
-      "sdc": 240,
-      "twig": 724
+      "attributes": 3007,
+      "di": 746,
+      "sdc": 203,
+      "twig": 618
     }
   },
   "checks": {

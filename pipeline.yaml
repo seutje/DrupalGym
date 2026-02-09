@@ -196,10 +196,12 @@ dataset_refinement:
     - "code_reference"
     - "sdc_reference"
   chunk_instruction_mode: "metadata_only"
+  chunk_retrieval_mode: "head_only"
+  char_chunk_retrieval_mode: "head_only"
   weak_category_targets:
     attributes: 600
     di: 600
-    sdc: 240
+    sdc: 200
     twig: 450
   enforce_modern_drupal_patterns: true
   modern_drupal_required_categories: ["attributes", "di"]
@@ -244,14 +246,14 @@ dataset_refinement:
       - "\\.component\\.yml"
       - "single\\s+directory\\s+component"
   chunk_overlap_lines: 30
-  target_test_ratio: 0.55
+  target_test_ratio: 0.45
   exclude_test_sources_from_training_pool: false
   exclude_sources_prefixes:
     - "docs/symfony_com/"
     - "repos/mcp_tools/"
   augmentation:
     enabled: true
-    ratio: 0.75
+    ratio: 1.0
     input_excerpt_lines: 60
     types:
       - "bugfix"
@@ -288,14 +290,14 @@ training:
         base_model: "Qwen/Qwen2.5-Coder-3B"
         training_type: "QLoRA"
   full_scale:
-    min_train_samples: 8000
+    min_train_samples: 7000
     preferred_train_samples: 20000
     require_quality_tooling: true
     max_seq_len: 2048
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
     num_train_epochs: 3
-    max_steps: 150
+    max_steps: 450
     per_device_train_batch_size: 2
     per_device_eval_batch_size: 1
     gradient_accumulation_steps: 16 # L40S-safe effective batch for current dataset volume

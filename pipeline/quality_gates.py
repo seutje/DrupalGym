@@ -16,6 +16,7 @@ SYMBOL_PROMPT_RE = re.compile(
 PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
+SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
 PROCEDURAL_EXTENSIONS = (".module", ".install", ".inc", ".theme", ".profile")
 WHITESPACE_RE = re.compile(r"\s+")
 ROOT_PROCEDURAL_PHP = {
@@ -101,6 +102,7 @@ class QualityGate:
         self.run_phpcs = bool(cfg.get("run_phpcs", False))
         self.phpcs_bin = shutil.which("phpcs") if self.run_phpcs else None
         self.phpcs_drupal_standard_available = self._has_drupal_phpcs_standard() if self.phpcs_bin else False
+        self.phpcs_runtime_broken = False
         self.run_phpstan = bool(cfg.get("run_phpstan", False))
         self.phpstan_bin = shutil.which("phpstan") if self.run_phpstan else None
         self.phpstan_failure_mode = str(cfg.get("phpstan_failure_mode", "syntax_only")).strip().lower()
@@ -214,6 +216,12 @@ class QualityGate:
         return False
 
     @staticmethod
+    def _has_special_token_artifact(output: str) -> bool:
+        if SPECIAL_TOKEN_ARTIFACT_RE.search(output):
+            return True
+        return "_closed_prs" in output.lower()
+
+    @staticmethod
     def _normalize_for_hash(content: str) -> str:
         return WHITESPACE_RE.sub(" ", content).strip()
 
@@ -275,8 +283,20 @@ class QualityGate:
         output = (proc.stdout or "") + "\n" + (proc.stderr or "")
         return "Drupal" in output
 
+    @staticmethod
+    def _phpcs_runtime_misconfigured(output: str) -> bool:
+        lower = output.lower()
+        return (
+            "referenced sniff" in lower and "does not exist" in lower
+        ) or "coding standard \"drupal\" is not installed" in lower
+
     def _phpcs_ok(self, output: str, source: str) -> bool:
-        if not self.run_phpcs or not self.phpcs_bin or not self.phpcs_drupal_standard_available:
+        if (
+            not self.run_phpcs
+            or not self.phpcs_bin
+            or not self.phpcs_drupal_standard_available
+            or self.phpcs_runtime_broken
+        ):
             return True
         if "<?php" not in output:
             return True
@@ -293,6 +313,15 @@ class QualityGate:
                 capture_output=True,
                 text=True,
             )
+            combined = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+            if proc.returncode != 0 and self._phpcs_runtime_misconfigured(combined):
+                self.phpcs_runtime_broken = True
+                self.phpcs_drupal_standard_available = False
+                self.logger.error(
+                    "PHPCS runtime is misconfigured; disabling PHPCS gate for remaining samples.",
+                    error=combined[:500],
+                )
+                return True
             return proc.returncode == 0
 
     @staticmethod
@@ -446,6 +475,8 @@ class QualityGate:
             for token in self.path_leakage_tokens:
                 if token and token in model_facing_text:
                     return False, "path_leakage_token"
+        if self._has_special_token_artifact(output):
+            return False, "special_token_artifact"
 
         numeric_streak = self._numeric_line_streak(output)
         if numeric_streak >= self.max_numeric_line_streak:

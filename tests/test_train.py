@@ -54,6 +54,34 @@ class TrainHelpersTest(unittest.TestCase):
             )
             self.assertFalse(ok)
 
+    def test_dataset_artifact_audit_detects_special_token_artifact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            train_path = root / "train.jsonl"
+            valid_path = root / "valid.jsonl"
+            bad_sample = {
+                "instruction": "Explain the following topic based on Drupal 11 documentation: Example",
+                "input": "",
+                "output": "Looks normal\n<|fim_suffix|>\nbut should fail\n",
+            }
+            good_sample = {
+                "instruction": "Explain the following topic based on Drupal 11 documentation: Routing",
+                "input": "",
+                "output": "Use routing.yml with controller class and proper permissions.",
+            }
+            with open(train_path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(bad_sample) + "\n")
+            with open(valid_path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(good_sample) + "\n")
+
+            ok = _audit_dataset_artifacts(
+                dataset_dir=root,
+                logger=_DummyLogger(),
+                max_numeric_line_streak=12,
+                max_repeated_line_ratio=0.15,
+            )
+            self.assertFalse(ok)
+
     def test_completion_data_collator_pads_mixed_lengths(self):
         collator = _build_completion_data_collator(
             pad_token_id=42,

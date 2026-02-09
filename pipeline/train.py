@@ -2,6 +2,8 @@ import os
 import json
 import re
 import shutil
+import subprocess
+import tempfile
 import torch
 from typing import Any
 
@@ -55,6 +57,7 @@ from .logger import PipelineLogger
 
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
+SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
 OUTPUT_MARKER = "Output:"
 
 def _resolve_dtype(dtype_name: str):
@@ -145,6 +148,12 @@ def _has_predominantly_numeric_fenced_block(output: str) -> bool:
     return False
 
 
+def _has_special_token_artifact(output: str) -> bool:
+    if SPECIAL_TOKEN_ARTIFACT_RE.search(output):
+        return True
+    return "_closed_prs" in output.lower()
+
+
 def _numeric_line_streak(output: str) -> int:
     max_streak = 0
     current_streak = 0
@@ -182,6 +191,7 @@ def _audit_dataset_artifacts(
             "numeric_line_streak": 0,
             "repetitive_output": 0,
             "numeric_code_block_artifact": 0,
+            "special_token_artifact": 0,
         },
     }
 
@@ -207,6 +217,9 @@ def _audit_dataset_artifacts(
                     failed = True
                 if _has_predominantly_numeric_fenced_block(output):
                     summary["reasons"]["numeric_code_block_artifact"] += 1
+                    failed = True
+                if _has_special_token_artifact(output):
+                    summary["reasons"]["special_token_artifact"] += 1
                     failed = True
 
                 if failed:
@@ -248,10 +261,10 @@ def _count_jsonl_records(path: Path) -> int:
 
 
 def _missing_quality_tools(config: dict) -> list[str]:
-    def _tool_available(tool: str) -> bool:
-        if shutil.which(tool):
-            return True
-
+    def _resolve_tool_path(tool: str) -> str | None:
+        direct = shutil.which(tool)
+        if direct:
+            return direct
         candidate_dirs: list[str] = []
         composer_home = os.environ.get("COMPOSER_HOME", "").strip()
         if composer_home:
@@ -269,8 +282,37 @@ def _missing_quality_tools(config: dict) -> list[str]:
             seen.add(directory)
             tool_path = Path(directory) / tool
             if tool_path.is_file() and os.access(tool_path, os.X_OK):
-                return True
-        return False
+                return str(tool_path)
+        return None
+
+    def _tool_available(tool: str) -> bool:
+        return _resolve_tool_path(tool) is not None
+
+    def _phpcs_drupal_standard_usable() -> bool:
+        phpcs_bin = _resolve_tool_path("phpcs")
+        if not phpcs_bin:
+            return False
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".php", delete=False, encoding="utf-8") as handle:
+            handle.write("<?php\nclass DrupalGymQualityCheck {}\n")
+            temp_path = handle.name
+        try:
+            proc = subprocess.run(
+                [phpcs_bin, "--standard=Drupal", temp_path],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
+        if proc.returncode == 0:
+            return True
+        combined = ((proc.stdout or "") + "\n" + (proc.stderr or "")).lower()
+        if ("referenced sniff" in combined and "does not exist" in combined) or (
+            "coding standard \"drupal\" is not installed" in combined
+        ):
+            return False
+        return True
 
     required: set[str] = set()
     quality_cfg = config.get("quality", {})
@@ -284,6 +326,9 @@ def _missing_quality_tools(config: dict) -> list[str]:
         required.add("phpstan")
 
     missing = [tool for tool in sorted(required) if not _tool_available(tool)]
+    if "phpcs" not in missing and "phpcs" in required and not _phpcs_drupal_standard_usable():
+        missing.append("phpcs")
+    missing = sorted(set(missing))
     return missing
 
 def train_model(

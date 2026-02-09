@@ -83,6 +83,25 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         chunks = _chunk_sample(sample, max_output_lines=300, overlap_lines=30, instruction_mode="suffix")
         self.assertIn("[Part 1/", chunks[0]["instruction"])
 
+    def test_chunk_sample_head_only_mode_keeps_single_retrieval_chunk(self):
+        output = "\n".join([f"line_{idx}" for idx in range(1, 610)])
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+            "input": "",
+            "output": output,
+            "metadata": {"source": "repos/example/src/Example.php", "sample_type": "retrieval"},
+        }
+        chunks = _chunk_sample(
+            sample,
+            max_output_lines=300,
+            overlap_lines=30,
+            instruction_mode="metadata_only",
+            retrieval_mode="head_only",
+        )
+        self.assertEqual(len(chunks), 1)
+        self.assertTrue(chunks[0]["metadata"]["refinement"]["line_truncated"])
+        self.assertLessEqual(len(chunks[0]["output"].splitlines()), 300)
+
     def test_rebalance_reduces_test_ratio(self):
         samples = []
         for idx in range(10):
@@ -391,6 +410,21 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         )
         self.assertTrue(passed)
         self.assertEqual(reason, "")
+
+    def test_validate_rejects_symbol_prompt_without_symbol_declaration(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file <source_file>.",
+            "input": "Source file: <source_file>",
+            "output": "<?php\nnamespace Drupal\\example;\nfunction helper() {}\n",
+            "metadata": {
+                "source": "repos/example/src/Example.php",
+                "type": "code_reference",
+                "sample_type": "retrieval",
+            },
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "retrieval_symbol_declaration_missing")
 
     def test_char_chunk_sample_splits_long_char_output(self):
         long_line = "x" * 2500

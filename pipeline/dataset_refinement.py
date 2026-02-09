@@ -20,6 +20,7 @@ METHOD_RE = re.compile(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
+SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
 MAX_NUMERIC_LINE_STREAK = 12
 DEFAULT_MAX_REPEATED_LINE_RATIO = 0.31
 DEFAULT_WEAK_CATEGORY_PATTERNS: dict[str, list[str]] = {
@@ -70,6 +71,15 @@ def _has_predominantly_numeric_fenced_block(output: str) -> bool:
     return False
 
 
+def _has_special_token_artifact(output: str) -> bool:
+    if SPECIAL_TOKEN_ARTIFACT_RE.search(output):
+        return True
+    lower = output.lower()
+    if "_closed_prs" in lower:
+        return True
+    return False
+
+
 def _numeric_line_streak(output: str) -> int:
     max_streak = 0
     current_streak = 0
@@ -99,6 +109,8 @@ def _artifact_rejection_reason(
     max_numeric_line_streak: int = MAX_NUMERIC_LINE_STREAK,
     max_repeated_line_ratio: float = DEFAULT_MAX_REPEATED_LINE_RATIO,
 ) -> str:
+    if _has_special_token_artifact(output):
+        return "special_token_artifact"
     if _numeric_line_streak(output) >= max_numeric_line_streak:
         return "numeric_line_streak_artifact"
     if _repeated_line_ratio(output) > max_repeated_line_ratio:
@@ -244,11 +256,24 @@ def _normalized_output_duplicate_ratio(samples: list[dict[str, Any]]) -> float:
 
 
 def _char_chunk_sample(
-    sample: dict[str, Any], max_output_chars: int, overlap_lines: int
+    sample: dict[str, Any],
+    max_output_chars: int,
+    overlap_lines: int,
+    retrieval_mode: str = "chunk",
 ) -> list[dict[str, Any]]:
     output = str(sample.get("output", ""))
     if len(output) <= max_output_chars:
         return [sample]
+    if retrieval_mode == "head_only" and _sample_type(sample) == "retrieval":
+        record = copy.deepcopy(sample)
+        record["output"] = output[:max_output_chars]
+        metadata = dict(record.get("metadata", {}))
+        refinement = dict(metadata.get("refinement", {}))
+        refinement["char_truncated"] = True
+        refinement["char_truncate_limit"] = max_output_chars
+        metadata["refinement"] = refinement
+        record["metadata"] = metadata
+        return [record]
     lines = output.splitlines()
     if not lines:
         return [sample]
@@ -414,6 +439,16 @@ def _validate_sample(
         detected_kind, _detected_name = _detect_symbol_kind_and_name(sample)
         if prompt_kind != detected_kind:
             return False, f"{prompt_kind}_{detected_kind}_mismatch"
+        sample_type = str(sample.get("metadata", {}).get("type", "")).strip().lower()
+        if sample_type == "code_reference":
+            output_lstrip = output.lstrip()
+            if not output_lstrip.startswith("<?php"):
+                return False, "truncated_php_snippet"
+            declaration_re = re.compile(
+                rf"(?m)^[ \t]*(?:final\s+|abstract\s+)?(?:readonly\s+)?{re.escape(prompt_kind)}\s+{re.escape(symbol_slot)}\b"
+            )
+            if not declaration_re.search(output):
+                return False, "retrieval_symbol_declaration_missing"
     elif instruction.startswith("Show me the implementation of"):
         return False, "invalid_symbol_kind_prompt"
 
@@ -473,12 +508,30 @@ def _validate_sample(
 
 
 def _chunk_sample(
-    sample: dict[str, Any], max_output_lines: int, overlap_lines: int, instruction_mode: str = "metadata_only"
+    sample: dict[str, Any],
+    max_output_lines: int,
+    overlap_lines: int,
+    instruction_mode: str = "metadata_only",
+    retrieval_mode: str = "chunk",
 ) -> list[dict[str, Any]]:
     output = sample.get("output", "")
     lines = output.splitlines()
     if len(lines) <= max_output_lines:
         return [sample]
+    if retrieval_mode == "head_only" and _sample_type(sample) == "retrieval":
+        record = copy.deepcopy(sample)
+        truncated_lines = lines[:max_output_lines]
+        truncated_output = "\n".join(truncated_lines)
+        if output.endswith("\n"):
+            truncated_output += "\n"
+        record["output"] = truncated_output
+        metadata = dict(record.get("metadata", {}))
+        refinement = dict(metadata.get("refinement", {}))
+        refinement["line_truncated"] = True
+        refinement["line_truncate_limit"] = max_output_lines
+        metadata["refinement"] = refinement
+        record["metadata"] = metadata
+        return [record]
 
     overlap = max(0, min(overlap_lines, max_output_lines - 1))
     ranges = []
@@ -935,6 +988,8 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
         "duplicate_resolution": "prefer_augmented_drop_retrieval",
         "require_context_for_types": ["yaml_reference", "twig_reference", "code_reference"],
         "chunk_instruction_mode": "metadata_only",
+        "chunk_retrieval_mode": "head_only",
+        "char_chunk_retrieval_mode": "head_only",
         "weak_category_targets": {
             "attributes": 600,
             "di": 600,
@@ -1073,6 +1128,12 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
     overlap_lines = int(refine_cfg["chunk_overlap_lines"])
     max_output_chars = int(refine_cfg.get("max_output_chars", 6000))
     chunk_instruction_mode = str(refine_cfg.get("chunk_instruction_mode", "metadata_only"))
+    chunk_retrieval_mode = str(refine_cfg.get("chunk_retrieval_mode", "head_only")).strip().lower()
+    if chunk_retrieval_mode not in {"chunk", "head_only"}:
+        chunk_retrieval_mode = "head_only"
+    char_chunk_retrieval_mode = str(refine_cfg.get("char_chunk_retrieval_mode", "head_only")).strip().lower()
+    if char_chunk_retrieval_mode not in {"chunk", "head_only"}:
+        char_chunk_retrieval_mode = "head_only"
     chunked_records: list[dict[str, Any]] = []
     chunked_source_count = 0
     char_chunked_source_count = 0
@@ -1083,11 +1144,17 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             max_output_lines=max_output_lines,
             overlap_lines=overlap_lines,
             instruction_mode=chunk_instruction_mode,
+            retrieval_mode=chunk_retrieval_mode,
         )
         if len(chunks) > 1:
             chunked_source_count += 1
         for chunk in chunks:
-            char_chunks = _char_chunk_sample(chunk, max_output_chars=max_output_chars, overlap_lines=overlap_lines)
+            char_chunks = _char_chunk_sample(
+                chunk,
+                max_output_chars=max_output_chars,
+                overlap_lines=overlap_lines,
+                retrieval_mode=char_chunk_retrieval_mode,
+            )
             if len(char_chunks) > 1:
                 char_chunked_source_count += 1
             for char_chunk in char_chunks:

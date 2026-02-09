@@ -40,6 +40,7 @@ DEFAULT_PROMPT_SUITE = [
 PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 PHPSTAN_SYNTAX_ERROR_RE = re.compile(r"(syntax error|parse error)", re.IGNORECASE)
+SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
 
 
 def _iso_timestamp() -> str:
@@ -167,10 +168,13 @@ def _compute_format_sanity(output: str) -> dict[str, Any]:
 
     repeated_line_ratio = (max(counts.values()) / len(lines)) if len(lines) >= 20 and counts else 0.0
     has_prompt_wrapper_echo = bool(PROMPT_WRAPPER_RE.search(output))
+    has_special_token_artifact = bool(SPECIAL_TOKEN_ARTIFACT_RE.search(output) or "_closed_prs" in output.lower())
 
     penalties = 0.0
     if has_prompt_wrapper_echo:
         penalties += 0.6
+    if has_special_token_artifact:
+        penalties += 0.7
     if numeric_streak >= 40:
         penalties += 0.4
     if repeated_line_ratio >= 0.25:
@@ -180,6 +184,7 @@ def _compute_format_sanity(output: str) -> dict[str, Any]:
     return {
         "score": score,
         "has_prompt_wrapper_echo": has_prompt_wrapper_echo,
+        "has_special_token_artifact": has_special_token_artifact,
         "numeric_line_streak": numeric_streak,
         "repeated_line_ratio": round(repeated_line_ratio, 4),
         "is_sane": score >= 0.8,
@@ -284,12 +289,20 @@ def _has_drupal_phpcs_standard(phpcs_bin: str) -> bool:
     return "Drupal" in output
 
 
+def _phpcs_runtime_misconfigured(output: str) -> bool:
+    lower = output.lower()
+    return (
+        "referenced sniff" in lower and "does not exist" in lower
+    ) or "coding standard \"drupal\" is not installed" in lower
+
+
 def _run_phpcs(snippets: list[str]) -> dict[str, Any]:
     phpcs_bin = shutil.which("phpcs")
     summary: dict[str, Any] = {
         "enabled": True,
         "available": bool(phpcs_bin),
         "drupal_standard_available": False,
+        "runtime_broken": False,
         "checked": 0,
         "passed": 0,
         "failed": 0,
@@ -318,8 +331,17 @@ def _run_phpcs(snippets: list[str]) -> dict[str, Any]:
         if proc.returncode == 0:
             summary["passed"] += 1
         else:
+            combined = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+            if _phpcs_runtime_misconfigured(combined):
+                summary["runtime_broken"] = True
+                summary["drupal_standard_available"] = False
+                summary["checked"] = 0
+                summary["passed"] = 0
+                summary["failed"] = 0
+                summary["errors"] = [{"snippet": index, "message": combined[:500]}]
+                break
             summary["failed"] += 1
-            message = (proc.stderr or proc.stdout or "").strip()
+            message = combined
             summary["errors"].append({"snippet": index, "message": message[:500]})
     return summary
 
@@ -426,6 +448,7 @@ def _run_external_checks(output: str, eval_cfg: dict[str, Any]) -> dict[str, Any
             "enabled": bool(eval_cfg.get("run_phpcs", False)),
             "available": False,
             "drupal_standard_available": False,
+            "runtime_broken": False,
             "checked": 0,
             "passed": 0,
             "failed": 0,
