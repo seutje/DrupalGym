@@ -1,6 +1,8 @@
 import json
+import re
 import subprocess
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -9,6 +11,11 @@ from bs4 import BeautifulSoup
 
 from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
+
+CHANGE_RECORD_NODE_RE = re.compile(r"/node/(\d+)")
+CHANGE_RECORD_VERSION_RE = re.compile(r"\b(10\.2\.x|10\.3\.x|11(?:\.[0-9]+)?\.x(?:-dev)?)\b", re.IGNORECASE)
+BEFORE_HINT_RE = re.compile(r"\b(before|legacy|deprecated|old)\b", re.IGNORECASE)
+AFTER_HINT_RE = re.compile(r"\b(after|new|replacement|updated)\b", re.IGNORECASE)
 
 
 class DocumentationFetcher:
@@ -196,6 +203,474 @@ def _doc_fetch_is_valid(result: dict) -> bool:
     return bool(result.get("success")) and int(result.get("pages", 0)) > 0
 
 
+def _normalize_ws(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def _extract_node_id(url: str) -> str:
+    match = CHANGE_RECORD_NODE_RE.search(url or "")
+    if match:
+        return match.group(1)
+    return "unknown"
+
+
+def _safe_filename_fragment(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return cleaned[:80] if cleaned else "change-record"
+
+
+def _parse_datetime_value(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
+
+    if re.fullmatch(r"\d{10,}", value):
+        try:
+            return datetime.fromtimestamp(int(value), tz=timezone.utc)
+        except (OverflowError, ValueError):
+            return None
+
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        pass
+
+    formats = [
+        "%B %d, %Y",
+        "%b %d, %Y",
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+    ]
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(value, fmt)
+            return parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _canonicalize_change_record_version(raw: str) -> str:
+    value = str(raw).lower()
+    if value.startswith("11"):
+        return "11.x"
+    if value.startswith("10.2"):
+        return "10.2.x"
+    if value.startswith("10.3"):
+        return "10.3.x"
+    return raw
+
+
+def _extract_change_record_versions(field_values: dict[str, str], text_blob: str) -> list[str]:
+    candidate_chunks: list[str] = [text_blob]
+    for key, value in field_values.items():
+        key_lower = key.lower()
+        if "version" in key_lower or "branch" in key_lower:
+            candidate_chunks.append(value)
+
+    versions: set[str] = set()
+    for chunk in candidate_chunks:
+        for match in CHANGE_RECORD_VERSION_RE.findall(chunk or ""):
+            versions.add(_canonicalize_change_record_version(match))
+    return sorted(versions)
+
+
+def _extract_change_record_fields(soup: BeautifulSoup) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for field in soup.select("div[class*='field--name-']"):
+        classes = field.get("class") or []
+        names = [item[len("field--name-") :] for item in classes if item.startswith("field--name-")]
+        if not names:
+            continue
+        text = _normalize_ws(field.get_text(" ", strip=True))
+        if not text:
+            continue
+        for name in names:
+            previous = fields.get(name, "")
+            fields[name] = _normalize_ws(f"{previous} {text}")
+    return fields
+
+
+def _extract_change_record_status(field_values: dict[str, str], text_blob: str) -> str:
+    chunks: list[str] = [text_blob]
+    for key, value in field_values.items():
+        key_lower = key.lower()
+        if "status" in key_lower or "moderation" in key_lower or "state" in key_lower:
+            chunks.append(value)
+
+    blob = "\n".join(chunks).lower()
+    if "draft" in blob:
+        return "draft"
+    if "published" in blob:
+        return "published"
+    return "published_inferred"
+
+
+def _extract_change_record_updated_at(
+    soup: BeautifulSoup,
+    field_values: dict[str, str],
+    text_blob: str,
+) -> datetime | None:
+    candidates: list[str] = []
+    for node in soup.find_all("time"):
+        datetime_attr = node.get("datetime")
+        if datetime_attr:
+            candidates.append(str(datetime_attr))
+        text = _normalize_ws(node.get_text(" ", strip=True))
+        if text:
+            candidates.append(text)
+
+    for key, value in field_values.items():
+        key_lower = key.lower()
+        if any(token in key_lower for token in ("changed", "updated", "created", "date", "time")):
+            candidates.append(value)
+
+    for token in re.findall(r"\b(?:\d{4}-\d{2}-\d{2}|[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})\b", text_blob):
+        candidates.append(token)
+
+    parsed_values = [dt for dt in (_parse_datetime_value(item) for item in candidates) if dt is not None]
+    if not parsed_values:
+        return None
+    return max(parsed_values)
+
+
+def _extract_change_record_language(block) -> str:
+    for node in [block, block.find("code") if hasattr(block, "find") else None]:
+        if node is None:
+            continue
+        classes = node.get("class", [])
+        if not isinstance(classes, list):
+            continue
+        for css_class in classes:
+            css_class = str(css_class)
+            if css_class.startswith("language-"):
+                return css_class.split("-", 1)[1]
+    return "php"
+
+
+def _extract_change_record_code_blocks(container) -> list[dict[str, str]]:
+    blocks: list[dict[str, str]] = []
+    if container is None:
+        return blocks
+    for pre in container.find_all("pre"):
+        code_node = pre.find("code")
+        code_text = (code_node or pre).get_text("\n")
+        code_text = code_text.strip("\n")
+        if len(code_text.strip()) < 20:
+            continue
+
+        label = ""
+        for previous in pre.find_all_previous(["h2", "h3", "h4", "strong", "p"], limit=4):
+            candidate = _normalize_ws(previous.get_text(" ", strip=True))
+            if not candidate or len(candidate) > 140:
+                continue
+            label = candidate
+            break
+
+        blocks.append(
+            {
+                "label": label,
+                "language": _extract_change_record_language(pre),
+                "code": code_text,
+            }
+        )
+    return blocks
+
+
+def _extract_before_after_pairs(blocks: list[dict[str, str]]) -> list[dict[str, str]]:
+    pairs: list[dict[str, str]] = []
+    pending_before: dict[str, str] | None = None
+
+    for idx, block in enumerate(blocks):
+        label = block.get("label", "")
+        if BEFORE_HINT_RE.search(label):
+            pending_before = block
+            continue
+        if AFTER_HINT_RE.search(label):
+            if pending_before:
+                pairs.append({"before": pending_before["code"], "after": block["code"], "language": block["language"]})
+                pending_before = None
+            elif idx > 0:
+                pairs.append({"before": blocks[idx - 1]["code"], "after": block["code"], "language": block["language"]})
+
+    if not pairs and len(blocks) >= 2:
+        pairs.append({"before": blocks[0]["code"], "after": blocks[1]["code"], "language": blocks[1]["language"]})
+
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for pair in pairs:
+        key = (pair.get("before", "").strip(), pair.get("after", "").strip())
+        if not key[0] or not key[1] or key[0] == key[1] or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(pair)
+    return deduped
+
+
+def _extract_change_record_rationale(container) -> str:
+    if container is None:
+        return ""
+    paragraphs: list[str] = []
+    for node in container.find_all(["p", "li"]):
+        text = _normalize_ws(node.get_text(" ", strip=True))
+        if len(text) < 60:
+            continue
+        lower = text.lower()
+        if lower.startswith("before") or lower.startswith("after"):
+            continue
+        paragraphs.append(text)
+        if len(paragraphs) >= 4:
+            break
+    return "\n\n".join(paragraphs)
+
+
+def _render_change_record_markdown(
+    *,
+    title: str,
+    record_url: str,
+    status: str,
+    versions: list[str],
+    updated_at: datetime | None,
+    rationale: str,
+    pairs: list[dict[str, str]],
+) -> str:
+    timestamp = updated_at.isoformat().replace("+00:00", "Z") if updated_at else "unknown"
+    lines: list[str] = [
+        f"# {title}",
+        "",
+        "## Change Record Metadata",
+        f"- Status: {status}",
+        f"- Target versions: {', '.join(versions) if versions else 'unknown'}",
+        f"- Updated: {timestamp}",
+        f"- URL: {record_url}",
+        "",
+        "## Rationale",
+        rationale or "No rationale text extracted from the record body.",
+    ]
+
+    for idx, pair in enumerate(pairs, start=1):
+        language = pair.get("language", "php")
+        before_heading = "## Before" if idx == 1 else f"## Before {idx}"
+        after_heading = "## After" if idx == 1 else f"## After {idx}"
+        lines.extend(
+            [
+                "",
+                before_heading,
+                f"```{language}",
+                pair.get("before", "").rstrip(),
+                "```",
+                "",
+                after_heading,
+                f"```{language}",
+                pair.get("after", "").rstrip(),
+                "```",
+            ]
+        )
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _parse_change_record_page(
+    html: str,
+    record_url: str,
+    *,
+    target_versions: set[str],
+    lookback_cutoff: datetime | None,
+) -> dict[str, object]:
+    soup = BeautifulSoup(html, "lxml")
+    title_node = soup.find("h1")
+    title = _normalize_ws(title_node.get_text(" ", strip=True) if title_node else "")
+    if not title:
+        title = f"Drupal change record {_extract_node_id(record_url)}"
+
+    fields = _extract_change_record_fields(soup)
+    text_blob = _normalize_ws(soup.get_text(" ", strip=True))
+    status = _extract_change_record_status(fields, text_blob)
+    if status == "draft":
+        return {"accepted": False, "reason": "draft"}
+
+    versions = _extract_change_record_versions(fields, text_blob)
+    if target_versions and not set(versions).intersection(target_versions):
+        return {"accepted": False, "reason": "version_filtered"}
+
+    updated_at = _extract_change_record_updated_at(soup, fields, text_blob)
+    if lookback_cutoff and updated_at and updated_at < lookback_cutoff:
+        return {"accepted": False, "reason": "lookback_filtered"}
+    if lookback_cutoff and updated_at is None:
+        return {"accepted": False, "reason": "missing_updated_at"}
+
+    container = (
+        soup.select_one(".change-record-description")
+        or soup.select_one(".field--name-body")
+        or soup.select_one("article")
+        or soup.select_one("main")
+        or soup.body
+    )
+    rationale = _extract_change_record_rationale(container)
+    blocks = _extract_change_record_code_blocks(container)
+    pairs = _extract_before_after_pairs(blocks)
+    if not pairs:
+        return {"accepted": False, "reason": "missing_before_after"}
+
+    markdown = _render_change_record_markdown(
+        title=title,
+        record_url=record_url,
+        status=status,
+        versions=versions,
+        updated_at=updated_at,
+        rationale=rationale,
+        pairs=pairs,
+    )
+    return {
+        "accepted": True,
+        "reason": "accepted",
+        "markdown": markdown,
+        "status": status,
+        "versions": versions,
+        "updated_at": updated_at.isoformat().replace("+00:00", "Z") if updated_at else None,
+        "title": title,
+        "node_id": _extract_node_id(record_url),
+    }
+
+
+def fetch_drupal_change_records(source: dict, fetcher: DocumentationFetcher, docs_dir: Path, logger: PipelineLogger) -> dict:
+    start_url = str(source.get("url", "https://www.drupal.org/list-changes/drupal")).strip()
+    allowed_node_prefix = str(source.get("allowed_node_prefix", "https://www.drupal.org/node/")).strip()
+    required_status = str(source.get("status", "published")).strip().lower()
+    max_list_pages = max(1, int(source.get("max_list_pages", 80)))
+    max_records = max(1, int(source.get("max_records", 1000)))
+    lookback_months = max(1, int(source.get("lookback_months", 24)))
+    target_versions = {
+        _canonicalize_change_record_version(str(version).strip())
+        for version in source.get("target_versions", ["10.2.x", "10.3.x", "11.x"])
+        if str(version).strip()
+    }
+
+    lookback_cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_months * 30)
+    change_records_dir = docs_dir / "www_drupal_org" / "change_records"
+    change_records_dir.mkdir(parents=True, exist_ok=True)
+
+    discovered_urls: set[str] = set()
+    failed_pages = 0
+    consecutive_empty_pages = 0
+    consecutive_failed_pages = 0
+
+    for page_number in range(max_list_pages):
+        page_url = start_url if page_number == 0 else f"{start_url}?page={page_number}"
+        try:
+            response = fetcher.session.get(page_url, timeout=30)
+            response.raise_for_status()
+        except Exception as exc:
+            failed_pages += 1
+            consecutive_failed_pages += 1
+            logger.error(f"Failed to fetch change record listing page {page_url}: {exc}")
+            if consecutive_failed_pages >= 3:
+                break
+            continue
+        consecutive_failed_pages = 0
+
+        soup = BeautifulSoup(response.text, "lxml")
+        node_links: set[str] = set()
+        for anchor in soup.select(".view-content a[href*='/node/'], main a[href*='/node/']"):
+            href = anchor.get("href")
+            if not href:
+                continue
+            full_url = urljoin(page_url, href).split("#")[0]
+            if not full_url.startswith(allowed_node_prefix):
+                continue
+            if CHANGE_RECORD_NODE_RE.search(full_url):
+                node_links.add(full_url)
+
+        if not node_links:
+            consecutive_empty_pages += 1
+            if consecutive_empty_pages >= 2:
+                break
+        else:
+            consecutive_empty_pages = 0
+            discovered_urls.update(node_links)
+            if len(discovered_urls) >= max_records * 3:
+                break
+
+        time.sleep(0.2)
+
+    sorted_urls = sorted(discovered_urls, key=lambda value: int(_extract_node_id(value) or 0), reverse=True)
+    written = 0
+    bytes_written = 0
+    parse_failures = 0
+    kept_ids: set[str] = set()
+    reason_counts: dict[str, int] = {}
+    inferred_status_count = 0
+
+    for record_url in sorted_urls:
+        if written >= max_records:
+            break
+        try:
+            response = fetcher.session.get(record_url, timeout=30)
+            response.raise_for_status()
+        except Exception as exc:
+            parse_failures += 1
+            logger.error(f"Failed to fetch change record {record_url}: {exc}")
+            continue
+
+        parsed = _parse_change_record_page(
+            response.text,
+            record_url,
+            target_versions=target_versions,
+            lookback_cutoff=lookback_cutoff,
+        )
+        reason = str(parsed.get("reason", "unknown"))
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        if not bool(parsed.get("accepted")):
+            continue
+        parsed_status = str(parsed.get("status", "")).strip().lower()
+        if required_status == "published" and parsed_status not in {"published", "published_inferred"}:
+            reason_counts["status_filtered"] = reason_counts.get("status_filtered", 0) + 1
+            continue
+
+        node_id = str(parsed.get("node_id") or "").strip()
+        if not node_id or node_id == "unknown":
+            node_id = _safe_filename_fragment(str(parsed.get("title", "")))
+        filename = f"{node_id}.md"
+        target_path = change_records_dir / filename
+        markdown = str(parsed.get("markdown", ""))
+        with open(target_path, "w", encoding="utf-8") as handle:
+            handle.write(markdown)
+
+        kept_ids.add(target_path.stem)
+        written += 1
+        bytes_written += len(markdown.encode("utf-8"))
+        if str(parsed.get("status", "")) == "published_inferred":
+            inferred_status_count += 1
+
+    pruned_files = 0
+    for existing in change_records_dir.glob("*.md"):
+        if existing.stem not in kept_ids:
+            existing.unlink(missing_ok=True)
+            pruned_files += 1
+
+    return {
+        "success": written > 0,
+        "pages": written,
+        "bytes": bytes_written,
+        "retried": 0,
+        "failed_pages": failed_pages + parse_failures,
+        "discovered_links": len(discovered_urls),
+        "written_records": written,
+        "pruned_records": pruned_files,
+        "lookback_months": lookback_months,
+        "target_versions": sorted(target_versions),
+        "required_status": required_status,
+        "reasons": reason_counts,
+        "published_status_inferred": inferred_status_count,
+    }
+
+
 def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
     sources_manifest_path = root / "sources" / "manifest.json"
     if not sources_manifest_path.exists():
@@ -317,6 +792,53 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
                     "url_denylist_terms": url_denylist_terms,
                 }
             )
+            continue
+
+        if source_type == "drupal_change_records":
+            logger.info(
+                f"Starting change record extraction for {source_id}",
+                source_id=source_id,
+                url=url,
+                max_list_pages=source.get("max_list_pages"),
+                max_records=source.get("max_records"),
+            )
+            result = fetch_drupal_change_records(source, fetcher, docs_dir, logger)
+            doc_pages_total += int(result.get("pages", 0))
+            manifest.add_output(
+                source_id,
+                str((docs_dir / "www_drupal_org" / "change_records").relative_to(root)),
+                "collection",
+            )
+            is_valid_doc_fetch = _doc_fetch_is_valid(result)
+            if is_valid_doc_fetch:
+                success_count += 1
+            else:
+                failure_count += 1
+                if int(result.get("pages", 0)) <= 0:
+                    zero_page_doc_sources += 1
+
+            fetch_status.append(
+                {
+                    "source_id": source_id,
+                    "type": "drupal_change_records",
+                    "success": is_valid_doc_fetch,
+                    "status": "ok" if is_valid_doc_fetch else "failed_zero_pages"
+                    if int(result.get("pages", 0)) <= 0
+                    else "failed",
+                    "bytes": int(result.get("bytes", 0)),
+                    "retried": int(result.get("retried", 0)),
+                    "pages": int(result.get("pages", 0)),
+                    "failed_pages": int(result.get("failed_pages", 0)),
+                    "discovered_links": int(result.get("discovered_links", 0)),
+                    "written_records": int(result.get("written_records", 0)),
+                    "pruned_records": int(result.get("pruned_records", 0)),
+                    "lookback_months": int(result.get("lookback_months", 0)),
+                    "target_versions": result.get("target_versions", []),
+                    "required_status": result.get("required_status", ""),
+                    "reasons": result.get("reasons", {}),
+                    "published_status_inferred": int(result.get("published_status_inferred", 0)),
+                }
+            )
 
     for source in sources_data.get("sources", {}).get("drupal_org_projects", []):
         source_id = source["id"]
@@ -362,7 +884,8 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
             "failure_count": failure_count,
             "doc_pages_captured": doc_pages_total,
             "zero_page_doc_sources": zero_page_doc_sources,
-            "total_repos": len(sources_data.get("sources", {}).get("drupal_org_projects", [])) + 1,
+            "total_repos": len(sources_data.get("sources", {}).get("drupal_org_projects", []))
+            + sum(1 for source in sources_data.get("sources", {}).get("curated", []) if source.get("type") == "git"),
         }
     )
 

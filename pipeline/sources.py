@@ -340,6 +340,7 @@ def _fetch_composer_metadata(
 def _build_curated_sources(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     source_cfg = config.get("sources", {})
     drupal_core = source_cfg.get("drupal_core", {})
+    change_records_cfg = source_cfg.get("drupal_change_records", {})
     curated: List[Dict[str, Any]] = [
         {
             "id": "drupal_core",
@@ -385,6 +386,22 @@ def _build_curated_sources(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             "description": "Drupal security advisories",
         },
     ]
+    if bool(change_records_cfg.get("enabled", True)):
+        curated.append(
+            {
+                "id": "drupal_change_records",
+                "type": change_records_cfg.get("type", "drupal_change_records"),
+                "url": change_records_cfg.get("list_url", "https://www.drupal.org/list-changes/drupal"),
+                "ref": None,
+                "description": "Drupal core change records",
+                "target_versions": change_records_cfg.get("target_versions", ["10.2.x", "10.3.x", "11.x"]),
+                "status": change_records_cfg.get("status", "published"),
+                "lookback_months": int(change_records_cfg.get("lookback_months", 24)),
+                "max_list_pages": int(change_records_cfg.get("max_list_pages", 80)),
+                "max_records": int(change_records_cfg.get("max_records", 1000)),
+                "allowed_node_prefix": change_records_cfg.get("allowed_node_prefix", "https://www.drupal.org/node/"),
+            }
+        )
 
     extra_sources = source_cfg.get("curated_repos", [])
     if isinstance(extra_sources, list):

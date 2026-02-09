@@ -1,22 +1,23 @@
 {
   "stage": "sources",
-  "timestamp": "2026-02-08T09:26:56Z",
+  "timestamp": "2026-02-09T18:40:04Z",
   "inputs": [],
   "outputs": {
     "sources_manifest": {
       "path": "sources/manifest.json",
-      "hash": "7b8cb1a8131ef549e06e68f355d02c92590226d38e15cc5f309b3d980addfb83"
+      "hash": "b441bbf14463abe2ff95fb226abdab6435b62764702165d1abd085b890df7690"
     }
   },
   "metrics": {
     "projects_discovered": 1000,
     "projects_candidates": 14,
     "projects_filtered": 14,
-    "curated_sources": 5,
+    "curated_sources": 14,
     "rejection_reasons": {
-      "missing_composer": 534,
-      "core_not_drupal11": 294,
+      "missing_composer": 529,
       "php_constraint_too_low": 157,
+      "core_not_drupal11": 298,
+      "excluded_machine_name": 1,
       "archived_or_security_only": 1
     },
     "max_projects_after_filter": 200

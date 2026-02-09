@@ -102,6 +102,42 @@ class SftGenerationHelpersTest(unittest.TestCase):
         contract_variant = self.generator.samples[3]
         self.assertIn("Component contract checklist", contract_variant["output"])
 
+    def test_generate_change_record_refactor_samples(self):
+        content = (
+            "# Convert hook_help to service class\n\n"
+            "## Change Record Metadata\n"
+            "- Status: published\n"
+            "- Target versions: 10.3.x, 11.x\n"
+            "- Updated: 2025-10-01T10:00:00Z\n"
+            "- URL: https://www.drupal.org/node/123456\n\n"
+            "## Rationale\n"
+            "Drupal 11 moves this behavior to a service for lazy loading and cleaner separation.\n\n"
+            "## Before\n"
+            "```php\n"
+            "<?php\n"
+            "function example_help() {\n"
+            "  return 'legacy';\n"
+            "}\n"
+            "```\n\n"
+            "## After\n"
+            "```php\n"
+            "<?php\n"
+            "final class ExampleHelpBuilder {\n"
+            "  public function build(): string {\n"
+            "    return 'modern';\n"
+            "  }\n"
+            "}\n"
+            "```\n"
+        )
+        self.generator.generate_from_doc(content, "docs/www_drupal_org/change_records/123456.md")
+        self.assertEqual(len(self.generator.samples), 1)
+        sample = self.generator.samples[0]
+        self.assertEqual(sample["metadata"]["type"], "refactor")
+        self.assertIn("Refactor this Drupal code", sample["instruction"])
+        self.assertIn("Legacy code:", sample["input"])
+        self.assertIn("Change record title: Convert hook_help to service class", sample["input"])
+        self.assertIn("final class ExampleHelpBuilder", sample["output"])
+
 
 if __name__ == "__main__":
     unittest.main()

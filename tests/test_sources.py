@@ -1,6 +1,7 @@
 import unittest
 
 from pipeline.sources import (
+    _build_curated_sources,
     _extract_default_branch,
     _extract_machine_name,
     _is_drupal_core_11,
@@ -25,6 +26,22 @@ class SourcesHelpersTest(unittest.TestCase):
     def test_supports_php_min(self):
         self.assertTrue(_supports_php_min("^8.3 || ^8.4", "8.3"))
         self.assertFalse(_supports_php_min("^8.1 || ^8.2", "8.3"))
+
+    def test_build_curated_sources_includes_change_records(self):
+        curated = _build_curated_sources(
+            {
+                "sources": {
+                    "drupal_core": {
+                        "type": "git",
+                        "url": "https://git.drupalcode.org/project/drupal.git",
+                        "branch": "11.x",
+                    },
+                    "drupal_change_records": {"enabled": True},
+                }
+            }
+        )
+        ids = {entry["id"] for entry in curated}
+        self.assertIn("drupal_change_records", ids)
 
 
 if __name__ == "__main__":

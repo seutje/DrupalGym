@@ -17,6 +17,12 @@ NAMESPACE_RE = re.compile(r"(?m)^namespace\s+([^;]+);")
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 DOC_MENU_IMAGE_RE = re.compile(r"^\[!\[[^\]]+\]\([^)]+\)\]\([^)]+\)\s*$")
 DOC_BRANCH_LINE_RE = re.compile(r"^\d+\.\s+\[[^\]]+\]\([^)]+\)\s+\\\w+")
+CHANGE_RECORD_PAIR_RE = re.compile(
+    r"##\s*Before(?:\s+\d+)?\s*\n```[^\n]*\n(.*?)```\s*##\s*After(?:\s+\d+)?\s*\n```[^\n]*\n(.*?)```",
+    re.IGNORECASE | re.DOTALL,
+)
+CHANGE_RECORD_METADATA_RE = re.compile(r"(?mi)^-\s*([A-Za-z ]+):\s*(.+)$")
+CHANGE_RECORD_RATIONALE_RE = re.compile(r"(?is)##\s*Rationale\s*(.*?)(?:\n##\s*Before|\Z)")
 
 
 class InstructionGenerator:
@@ -151,6 +157,93 @@ class InstructionGenerator:
         chunks.extend(selected)
         output = "\n\n".join(chunks)
         return output[: self.doc_max_output_chars].strip()
+
+    @staticmethod
+    def _extract_change_record_title(content: str, rel_path: str) -> str:
+        title_match = re.search(r"(?m)^#\s+(.+)$", content)
+        if title_match:
+            return title_match.group(1).strip()
+        return Path(rel_path).stem.replace("-", " ").strip() or "Drupal change record"
+
+    @staticmethod
+    def _extract_change_record_metadata(content: str) -> dict[str, str]:
+        metadata: dict[str, str] = {}
+        for key, value in CHANGE_RECORD_METADATA_RE.findall(content):
+            clean_key = str(key).strip().lower().replace(" ", "_")
+            metadata[clean_key] = str(value).strip()
+        return metadata
+
+    @staticmethod
+    def _extract_change_record_rationale(content: str) -> str:
+        match = CHANGE_RECORD_RATIONALE_RE.search(content)
+        if not match:
+            return ""
+        rationale = match.group(1).strip()
+        return re.sub(r"\n{3,}", "\n\n", rationale).strip()
+
+    @staticmethod
+    def _extract_change_record_pairs(content: str) -> list[tuple[str, str]]:
+        pairs: list[tuple[str, str]] = []
+        for before, after in CHANGE_RECORD_PAIR_RE.findall(content):
+            before_code = before.strip()
+            after_code = after.strip()
+            if not before_code or not after_code or before_code == after_code:
+                continue
+            pairs.append((before_code, after_code))
+        return pairs
+
+    def _is_change_record_doc(self, rel_path: str, content: str) -> bool:
+        rel_lower = rel_path.lower()
+        if rel_lower.startswith("docs/www_drupal_org/change_records/"):
+            return True
+        return "## change record metadata" in content.lower() and "## before" in content.lower() and "## after" in content.lower()
+
+    def generate_from_change_record(self, content: str, rel_path: str) -> None:
+        title = self._extract_change_record_title(content, rel_path)
+        metadata = self._extract_change_record_metadata(content)
+        rationale = self._extract_change_record_rationale(content)
+        version_hint = metadata.get("target_versions", "11.x")
+        record_url = metadata.get("url", "unknown")
+        pairs = self._extract_change_record_pairs(content)
+        if not pairs:
+            return
+
+        for index, (before_code, after_code) in enumerate(pairs, start=1):
+            instruction = f"Refactor this Drupal code to Drupal 11 compatibility based on change record: {title}"
+            input_lines = [
+                "Task: Convert legacy code to the Drupal 11-compatible implementation shown by this published change record.",
+                f"Change record title: {title}",
+                f"Target versions: {version_hint}",
+                f"Source URL: {record_url}",
+            ]
+            if rationale:
+                input_lines.append("Rationale:")
+                input_lines.append(rationale)
+            input_lines.extend(
+                [
+                    "Legacy code:",
+                    "```php",
+                    before_code,
+                    "```",
+                    f"Pair index: {index}",
+                ]
+            )
+            input_text = "\n".join(input_lines).strip()
+            self._append(
+                {
+                    "instruction": instruction,
+                    "input": input_text,
+                    "output": after_code,
+                    "metadata": {
+                        "source": rel_path,
+                        "type": "refactor",
+                        "sample_type": "retrieval",
+                        "topic": title,
+                        "target_versions": version_hint,
+                        "change_record_url": record_url,
+                    },
+                }
+            )
 
     def _is_doc_source_allowed(self, rel_path: str) -> bool:
         if not self.doc_source_allowlist_prefixes:
@@ -404,6 +497,10 @@ class InstructionGenerator:
             )
 
     def generate_from_doc(self, content: str, rel_path: str):
+        if self._is_change_record_doc(rel_path, content):
+            self.generate_from_change_record(content, rel_path)
+            return
+
         generic_titles = {
             "contents of this file",
             "introduction",

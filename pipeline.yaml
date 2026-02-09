@@ -30,6 +30,16 @@ sources:
     limit: 1000
     sort: "changed"
     direction: "desc"
+  drupal_change_records:
+    enabled: true
+    type: "drupal_change_records"
+    list_url: "https://www.drupal.org/list-changes/drupal"
+    allowed_node_prefix: "https://www.drupal.org/node/"
+    status: "published"
+    target_versions: ["10.2.x", "10.3.x", "11.x"]
+    lookback_months: 24
+    max_list_pages: 80
+    max_records: 1000
   discovery:
     max_pages: 20
     limit_per_page: 50
@@ -106,7 +116,7 @@ acquisition:
       - "%40block"
     allowed_prefixes:
       drupal_recipes:
-        - "https://www.drupal.org/docs/extending-drupal/recipes"
+        - "https://www.drupal.org/docs/extending-drupal/drupal-recipes"
       drupal_docs:
         - "https://www.drupal.org/docs"
         - "https://www.drupal.org/docs/develop"
@@ -119,6 +129,9 @@ acquisition:
         - "https://symfony.com/doc/7.0/"
       drupal_security:
         - "https://www.drupal.org/security"
+      drupal_change_records:
+        - "https://www.drupal.org/list-changes/drupal"
+        - "https://www.drupal.org/node/"
 
 normalization:
   dedup:
@@ -136,7 +149,7 @@ sft_generation:
     - "repos/mcp_tools/"
   doc_source_allowlist_prefixes:
     - "docs/www_drupal_org/"
-    - "docs/www_drupal_org/docs/extending-drupal/recipes/"
+    - "docs/www_drupal_org/docs/extending-drupal/drupal-recipes/"
     - "docs/www_drupal_org/docs/develop/theming/"
     - "docs/www_drupal_org/docs/develop/theming-drupal/"
     - "docs/www_drupal_org/docs/develop/theming-drupal/single-directory-components/"
@@ -194,12 +207,14 @@ quality:
     twig_reference: 120
     sdc_reference: 120
     doc_summary: 180
+    refactor: 80
   max_output_chars_by_type:
     code_reference: 24000
     yaml_reference: 8000
     twig_reference: 12000
     sdc_reference: 12000
     doc_summary: 12000
+    refactor: 24000
   max_numeric_line_streak: 12
   max_repeated_line_ratio: 0.31
   duplicate_output_mode: "normalized"
@@ -211,7 +226,7 @@ quality:
     - "sdc_reference"
   doc_source_allowlist_prefixes:
     - "docs/www_drupal_org/"
-    - "docs/www_drupal_org/docs/extending-drupal/recipes/"
+    - "docs/www_drupal_org/docs/extending-drupal/drupal-recipes/"
     - "docs/www_drupal_org/docs/develop/theming/"
     - "docs/www_drupal_org/docs/develop/theming-drupal/"
     - "docs/www_drupal_org/docs/develop/theming-drupal/single-directory-components/"
