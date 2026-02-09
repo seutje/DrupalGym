@@ -15,6 +15,12 @@ directories:
   sources: "sources"
 
 sources:
+  rate_limit:
+    delay_seconds: 0.1
+    max_retries: 3
+    max_requests_per_second: 2.0
+  parallel:
+    composer_workers: 4
   drupal_core:
     type: "git"
     url: "https://git.drupalcode.org/project/drupal.git"
@@ -109,9 +115,20 @@ sources:
       - "mcp_tools"
 
 acquisition:
+  parallel:
+    git_workers: 4
+    docs_workers: 2
+    change_record_workers: 4
   exclude_source_ids:
     - "mcp_tools"
   docs:
+    request_timeout_seconds: 30
+    request_delay_seconds: 0.25
+    retry_backoff_seconds: 0.4
+    max_retries: 2
+    change_record_request_timeout_seconds: 30
+    change_record_request_delay_seconds: 0.15
+    change_record_listing_delay_seconds: 0.15
     max_pages_per_source: 300
     url_denylist_terms:
       - "drupal-8"
@@ -140,6 +157,8 @@ acquisition:
         - "https://www.drupal.org/node/"
 
 normalization:
+  parallel:
+    read_workers: 6
   dedup:
     exact_hash: true
     near_dup_enabled: true
@@ -147,6 +166,8 @@ normalization:
     near_dup_threshold: 0.92
 
 sft_generation:
+  parallel:
+    read_workers: 6
   enable_symbol_kind_prompts: true
   enable_sdc_bundle_generation: true
   sdc_bundle_variants: 4
@@ -173,6 +194,7 @@ sft_generation:
   doc_max_output_chars: 6000
 
 quality:
+  runtime_check_workers: 3
   run_php_lint: true
   run_phpcs: true
   run_phpstan: true

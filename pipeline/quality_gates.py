@@ -3,6 +3,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Pattern
 
@@ -108,6 +109,7 @@ class QualityGate:
         self.phpstan_failure_mode = str(cfg.get("phpstan_failure_mode", "syntax_only")).strip().lower()
         if self.phpstan_failure_mode not in {"syntax_only", "strict"}:
             self.phpstan_failure_mode = "syntax_only"
+        self.runtime_check_workers = max(1, min(3, int(cfg.get("runtime_check_workers", 3))))
         self.reject_prompt_wrapper_echo = bool(cfg.get("reject_prompt_wrapper_echo", True))
         self.reject_path_leakage_tokens = bool(cfg.get("reject_path_leakage_tokens", True))
         self.path_leakage_tokens = [str(token).lower() for token in cfg.get("path_leakage_tokens", ["repos/"])]
@@ -385,6 +387,58 @@ class QualityGate:
             return syntax_errors == 0
         return False
 
+    def _run_runtime_checks(self, output: str, source: str) -> tuple[bool, str]:
+        if "<?php" not in output:
+            return True, ""
+
+        checks: list[tuple[str, callable]] = [
+            ("php_syntax_error", lambda: self._php_lint_ok(output)),
+            ("phpcs_drupal_violation", lambda: self._phpcs_ok(output, source=source)),
+            ("phpstan_failure", lambda: self._phpstan_ok(output)),
+        ]
+
+        if self.runtime_check_workers <= 1:
+            for reason, runner in checks:
+                if not runner():
+                    return False, reason
+            return True, ""
+
+        active_checks: list[tuple[str, callable]] = []
+        for reason, runner in checks:
+            if reason == "php_syntax_error" and (not self.run_php_lint or not self.php_bin):
+                continue
+            if reason == "phpcs_drupal_violation" and (
+                not self.run_phpcs
+                or not self.phpcs_bin
+                or not self.phpcs_drupal_standard_available
+                or self.phpcs_runtime_broken
+            ):
+                continue
+            if reason == "phpstan_failure" and (not self.run_phpstan or not self.phpstan_bin):
+                continue
+            active_checks.append((reason, runner))
+
+        if len(active_checks) <= 1:
+            for reason, runner in checks:
+                if not runner():
+                    return False, reason
+            return True, ""
+
+        results: dict[str, bool] = {}
+        with ThreadPoolExecutor(max_workers=min(self.runtime_check_workers, len(active_checks))) as executor:
+            future_to_reason = {executor.submit(runner): reason for reason, runner in active_checks}
+            for future, reason in future_to_reason.items():
+                try:
+                    results[reason] = bool(future.result())
+                except Exception as exc:
+                    self.logger.error("Runtime quality check failed.", reason=reason, error=str(exc))
+                    results[reason] = False
+
+        for reason, _runner in checks:
+            if reason in results and not results[reason]:
+                return False, reason
+        return True, ""
+
     def _sample_requires_modern_patterns(
         self, sample_type: str, source: str, instruction_lower: str, output_lower: str
     ) -> bool:
@@ -548,12 +602,9 @@ class QualityGate:
         ):
             return False, "missing_namespace_in_php"
 
-        if not self._php_lint_ok(output):
-            return False, "php_syntax_error"
-        if not self._phpcs_ok(output, source=source):
-            return False, "phpcs_drupal_violation"
-        if not self._phpstan_ok(output):
-            return False, "phpstan_failure"
+        runtime_ok, runtime_reason = self._run_runtime_checks(output, source)
+        if not runtime_ok:
+            return False, runtime_reason
 
         self.seen_output_hashes.add(output_hash)
         pair_outputs = self.instruction_input_outputs.setdefault(pair_key, set())

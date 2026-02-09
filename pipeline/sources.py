@@ -1,7 +1,9 @@
 import json
 import random
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -22,6 +24,38 @@ class RateLimitPolicy:
     max_retries: int = DEFAULT_MAX_RETRIES
 
 
+class RequestRateLimiter:
+    def __init__(self, max_requests_per_second: float):
+        self.max_requests_per_second = max(0.0, float(max_requests_per_second))
+        self._interval_seconds = (1.0 / self.max_requests_per_second) if self.max_requests_per_second > 0 else 0.0
+        self._next_allowed = 0.0
+        self._lock = threading.Lock()
+
+    def wait(self) -> None:
+        if self._interval_seconds <= 0:
+            return
+
+        sleep_seconds = 0.0
+        with self._lock:
+            now = time.monotonic()
+            if now < self._next_allowed:
+                sleep_seconds = self._next_allowed - now
+                self._next_allowed += self._interval_seconds
+            else:
+                self._next_allowed = now + self._interval_seconds
+
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
+
+def _clamp_workers(value: Any, *, default: int, hard_max: int = 16) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(hard_max, parsed))
+
+
 def _sleep(delay_seconds: float) -> None:
     if delay_seconds > 0:
         time.sleep(delay_seconds)
@@ -33,12 +67,15 @@ def _request_json(
     logger,
     params: Optional[Dict[str, Any]] = None,
     policy: Optional[RateLimitPolicy] = None,
+    rate_limiter: Optional[RequestRateLimiter] = None,
     timeout: int = DEFAULT_TIMEOUT,
     allow_404: bool = False,
 ) -> Optional[Dict[str, Any]]:
     policy = policy or RateLimitPolicy()
     for attempt in range(1, policy.max_retries + 1):
         try:
+            if rate_limiter:
+                rate_limiter.wait()
             response = session.get(url, params=params, timeout=timeout)
             if response.status_code in {429} or response.status_code >= 500:
                 logger.error(
@@ -95,12 +132,15 @@ def _request_text(
     url: str,
     logger,
     policy: Optional[RateLimitPolicy] = None,
+    rate_limiter: Optional[RequestRateLimiter] = None,
     timeout: int = DEFAULT_TIMEOUT,
     allow_404: bool = False,
 ) -> Optional[str]:
     policy = policy or RateLimitPolicy()
     for attempt in range(1, policy.max_retries + 1):
         try:
+            if rate_limiter:
+                rate_limiter.wait()
             response = session.get(url, timeout=timeout)
             if response.status_code in {429} or response.status_code >= 500:
                 logger.error(
@@ -209,6 +249,7 @@ def _iter_drupal_project_nodes(
     endpoint: str,
     logger,
     policy: RateLimitPolicy,
+    rate_limiter: Optional[RequestRateLimiter] = None,
     max_pages: int = 1,
     limit: Optional[int] = None,
     filters: Optional[Dict[str, Any]] = None,
@@ -237,6 +278,7 @@ def _iter_drupal_project_nodes(
             logger,
             params=params,
             policy=policy,
+            rate_limiter=rate_limiter,
         )
         if not payload or "list" not in payload:
             break
@@ -252,6 +294,7 @@ def _discover_drupal_projects(
     endpoint: str,
     logger,
     policy: RateLimitPolicy,
+    rate_limiter: Optional[RequestRateLimiter] = None,
     max_pages: int = 1,
     limit: Optional[int] = None,
     filters: Optional[Dict[str, Any]] = None,
@@ -264,6 +307,7 @@ def _discover_drupal_projects(
             endpoint,
             logger,
             policy,
+            rate_limiter=rate_limiter,
             max_pages=max_pages,
             limit=limit,
             filters=filters,
@@ -309,10 +353,11 @@ def _fetch_composer_metadata(
     machine_name: str,
     branches: List[str],
     policy: RateLimitPolicy,
+    rate_limiter: Optional[RequestRateLimiter] = None,
 ) -> Optional[Dict[str, Any]]:
     for branch in branches:
         url = f"https://git.drupalcode.org/project/{machine_name}/raw/{branch}/composer.json"
-        text = _request_text(session, url, logger, policy=policy, allow_404=True)
+        text = _request_text(session, url, logger, policy=policy, rate_limiter=rate_limiter, allow_404=True)
         if not text:
             continue
         try:
@@ -488,10 +533,20 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
     seed = int(config.get("seed", 42))
     rng = random.Random(seed)
 
-    policy = RateLimitPolicy()
+    source_cfg = config.get("sources", {})
+    rate_limit_cfg = source_cfg.get("rate_limit", {})
+    policy = RateLimitPolicy(
+        delay_seconds=float(rate_limit_cfg.get("delay_seconds", DEFAULT_RATE_LIMIT_DELAY)),
+        max_retries=int(rate_limit_cfg.get("max_retries", DEFAULT_MAX_RETRIES)),
+    )
+    global_max_rps = float(rate_limit_cfg.get("max_requests_per_second", 0))
+    rate_limiter = RequestRateLimiter(global_max_rps) if global_max_rps > 0 else None
+
+    parallel_cfg = source_cfg.get("parallel", {})
+    composer_workers = _clamp_workers(parallel_cfg.get("composer_workers", 4), default=4, hard_max=16)
+
     session = requests.Session()
 
-    source_cfg = config.get("sources", {})
     drupal_project_config = source_cfg.get("drupal_projects", {})
     discovery_cfg = source_cfg.get("discovery", {})
     filter_cfg = source_cfg.get("filters", {})
@@ -532,6 +587,7 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
             drupal_endpoint,
             logger,
             policy,
+            rate_limiter=rate_limiter,
             max_pages=max_pages,
             limit=limit,
             filters=filters,
@@ -552,8 +608,9 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
     }
 
     candidates: list[dict[str, Any]] = []
+    composer_targets: list[tuple[int, Dict[str, Any], str, List[str]]] = []
 
-    for project in discovered_projects:
+    for idx, project in enumerate(discovered_projects):
         machine_name = _extract_machine_name(project)
         if not machine_name:
             rejection_reasons["missing_machine_name"] = rejection_reasons.get("missing_machine_name", 0) + 1
@@ -571,8 +628,61 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
         for branch in ["11.x", "11.0.x", "1.x", "1.0.x", "2.x", "3.x", "main", "master"]:
             if branch and branch not in candidate_branches:
                 candidate_branches.append(branch)
+        composer_targets.append((idx, project, machine_name, candidate_branches))
 
-        composer_info = _fetch_composer_metadata(session, logger, machine_name, candidate_branches, policy)
+    composer_results_by_idx: dict[int, Optional[Dict[str, Any]]] = {}
+    if composer_targets:
+        if composer_workers <= 1:
+            for idx, _project, machine_name, candidate_branches in composer_targets:
+                composer_results_by_idx[idx] = _fetch_composer_metadata(
+                    session,
+                    logger,
+                    machine_name,
+                    candidate_branches,
+                    policy,
+                    rate_limiter=rate_limiter,
+                )
+        else:
+            logger.info(
+                "Fetching composer metadata in parallel.",
+                worker_count=composer_workers,
+                candidate_count=len(composer_targets),
+                max_requests_per_second=global_max_rps,
+                delay_seconds=policy.delay_seconds,
+            )
+
+            def _fetch_worker(target: tuple[int, Dict[str, Any], str, List[str]]) -> tuple[int, Optional[Dict[str, Any]]]:
+                idx, _project, machine_name, candidate_branches = target
+                worker_session = requests.Session()
+                worker_session.headers.update(headers)
+                try:
+                    return (
+                        idx,
+                        _fetch_composer_metadata(
+                            worker_session,
+                            logger,
+                            machine_name,
+                            candidate_branches,
+                            policy,
+                            rate_limiter=rate_limiter,
+                        ),
+                    )
+                finally:
+                    worker_session.close()
+
+            with ThreadPoolExecutor(max_workers=composer_workers) as executor:
+                future_to_idx = {executor.submit(_fetch_worker, target): target[0] for target in composer_targets}
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    try:
+                        result_idx, composer_info = future.result()
+                        composer_results_by_idx[result_idx] = composer_info
+                    except Exception as exc:
+                        logger.error("Composer metadata worker failed.", project_index=idx, error=str(exc))
+                        composer_results_by_idx[idx] = None
+
+    for idx, project, machine_name, candidate_branches in composer_targets:
+        composer_info = composer_results_by_idx.get(idx)
         if not composer_info:
             rejection_reasons["missing_composer"] = rejection_reasons.get("missing_composer", 0) + 1
             continue
@@ -655,6 +765,9 @@ def run_sources_stage(config: Dict[str, Any], logger, root: Path) -> int:
         "curated_sources": len(curated_sources),
         "rejection_reasons": rejection_reasons,
         "max_projects_after_filter": max_after_filter,
+        "composer_candidates": len(composer_targets),
+        "composer_fetch_workers": composer_workers,
+        "max_requests_per_second": global_max_rps,
     }
 
     logger.metric("projects_discovered", len(discovered_projects))

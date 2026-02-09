@@ -2,8 +2,10 @@ import json
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -18,11 +20,32 @@ BEFORE_HINT_RE = re.compile(r"\b(before|legacy|deprecated|old)\b", re.IGNORECASE
 AFTER_HINT_RE = re.compile(r"\b(after|new|replacement|updated)\b", re.IGNORECASE)
 
 
+def _clamp_workers(value: Any, *, default: int, hard_max: int = 16) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(hard_max, parsed))
+
+
 class DocumentationFetcher:
-    def __init__(self, logger: PipelineLogger, base_docs_dir: Path):
+    def __init__(
+        self,
+        logger: PipelineLogger,
+        base_docs_dir: Path,
+        *,
+        request_timeout_seconds: int = 30,
+        request_delay_seconds: float = 0.3,
+        retry_backoff_seconds: float = 0.4,
+        max_retries: int = 2,
+    ):
         self.logger = logger
         self.base_docs_dir = base_docs_dir
         self.visited = set()
+        self.request_timeout_seconds = max(1, int(request_timeout_seconds))
+        self.request_delay_seconds = max(0.0, float(request_delay_seconds))
+        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
+        self.max_retries = max(0, int(max_retries))
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "DrupalGym/1.0 (Training Pipeline)"})
 
@@ -34,24 +57,29 @@ class DocumentationFetcher:
                 "bytes": target_file.stat().st_size,
                 "retried": 0,
                 "cached": True,
+                "text": None,
             }
 
-        retries = 2
+        retries = self.max_retries
         for attempt in range(retries + 1):
             try:
                 target_file.parent.mkdir(parents=True, exist_ok=True)
-                response = self.session.get(url, timeout=30)
+                response = self.session.get(url, timeout=self.request_timeout_seconds)
                 status_code = response.status_code
                 response.raise_for_status()
                 with open(target_file, "wb") as handle:
                     handle.write(response.content)
-                time.sleep(0.3)
+                if self.request_delay_seconds > 0:
+                    time.sleep(self.request_delay_seconds)
+                content_type = str(response.headers.get("Content-Type", "")).lower()
+                page_text = response.text if "text/" in content_type or "application/xhtml" in content_type else None
                 return {
                     "success": True,
                     "status": status_code,
                     "bytes": len(response.content),
                     "retried": attempt,
                     "cached": False,
+                    "text": page_text,
                 }
             except Exception as exc:
                 if attempt >= retries:
@@ -62,14 +90,17 @@ class DocumentationFetcher:
                         "bytes": 0,
                         "retried": attempt,
                         "cached": False,
+                        "text": None,
                     }
-                time.sleep(0.4 * (attempt + 1))
+                if self.retry_backoff_seconds > 0:
+                    time.sleep(self.retry_backoff_seconds * (attempt + 1))
         return {
             "success": False,
             "status": None,
             "bytes": 0,
             "retried": retries,
             "cached": False,
+            "text": None,
         }
 
     def get_doc_path(self, url: str) -> Path:
@@ -84,24 +115,35 @@ class DocumentationFetcher:
 
     def discover_links(self, url: str, allowed_prefixes: list[str], url_denylist_terms: list[str] | None = None) -> list[str]:
         try:
-            response = self.session.get(url, timeout=30)
+            response = self.session.get(url, timeout=self.request_timeout_seconds)
             response.raise_for_status()
-            soup = BeautifulSoup(response.text, "lxml")
-            links: list[str] = []
-            denylist = [term.lower() for term in (url_denylist_terms or []) if str(term).strip()]
-            for anchor in soup.find_all("a", href=True):
-                full_url = urljoin(url, anchor["href"]).split("#")[0]
-                if full_url in self.visited:
-                    continue
-                if any(full_url.startswith(prefix) for prefix in allowed_prefixes):
-                    full_url_lower = full_url.lower()
-                    if any(term in full_url_lower for term in denylist):
-                        continue
-                    links.append(full_url)
-            return links
+            if self.request_delay_seconds > 0:
+                time.sleep(self.request_delay_seconds)
+            return self.discover_links_from_html(response.text, url, allowed_prefixes, url_denylist_terms=url_denylist_terms)
         except Exception as exc:
             self.logger.error(f"Discovery failed for {url}: {exc}")
             return []
+
+    def discover_links_from_html(
+        self,
+        html: str,
+        base_url: str,
+        allowed_prefixes: list[str],
+        url_denylist_terms: list[str] | None = None,
+    ) -> list[str]:
+        soup = BeautifulSoup(html or "", "lxml")
+        links: list[str] = []
+        denylist = [term.lower() for term in (url_denylist_terms or []) if str(term).strip()]
+        for anchor in soup.find_all("a", href=True):
+            full_url = urljoin(base_url, anchor["href"]).split("#")[0]
+            if full_url in self.visited:
+                continue
+            if any(full_url.startswith(prefix) for prefix in allowed_prefixes):
+                full_url_lower = full_url.lower()
+                if any(term in full_url_lower for term in denylist):
+                    continue
+                links.append(full_url)
+        return links
 
     def recursive_fetch(
         self,
@@ -135,11 +177,18 @@ class DocumentationFetcher:
                 captured += 1
                 bytes_written += int(result.get("bytes", 0))
                 if url.endswith((".html", "/")) or "." not in url.split("/")[-1] or "api.drupal.org" in url:
-                    queue.extend(
-                        link
-                        for link in self.discover_links(url, allowed_prefixes, url_denylist_terms=denylist)
-                        if link not in self.visited
-                    )
+                    discovered = []
+                    page_text = result.get("text")
+                    if isinstance(page_text, str) and page_text.strip():
+                        discovered = self.discover_links_from_html(
+                            page_text,
+                            url,
+                            allowed_prefixes,
+                            url_denylist_terms=denylist,
+                        )
+                    else:
+                        discovered = self.discover_links(url, allowed_prefixes, url_denylist_terms=denylist)
+                    queue.extend(link for link in discovered if link not in self.visited)
             else:
                 failed_pages += 1
 
@@ -545,6 +594,19 @@ def fetch_drupal_change_records(source: dict, fetcher: DocumentationFetcher, doc
     required_status = str(source.get("status", "published")).strip().lower()
     max_list_pages = max(1, int(source.get("max_list_pages", 80)))
     max_records = max(1, int(source.get("max_records", 1000)))
+    record_workers = _clamp_workers(source.get("parallel_workers", 1), default=1, hard_max=12)
+    record_request_delay_seconds = max(
+        0.0,
+        float(source.get("record_request_delay_seconds", fetcher.request_delay_seconds)),
+    )
+    record_request_timeout_seconds = max(
+        1,
+        int(source.get("record_request_timeout_seconds", fetcher.request_timeout_seconds)),
+    )
+    listing_request_delay_seconds = max(
+        0.0,
+        float(source.get("listing_request_delay_seconds", min(0.2, fetcher.request_delay_seconds))),
+    )
     lookback_months = max(1, int(source.get("lookback_months", 24)))
     target_versions = {
         _canonicalize_change_record_version(str(version).strip())
@@ -564,7 +626,7 @@ def fetch_drupal_change_records(source: dict, fetcher: DocumentationFetcher, doc
     for page_number in range(max_list_pages):
         page_url = start_url if page_number == 0 else f"{start_url}?page={page_number}"
         try:
-            response = fetcher.session.get(page_url, timeout=30)
+            response = fetcher.session.get(page_url, timeout=record_request_timeout_seconds)
             response.raise_for_status()
         except Exception as exc:
             failed_pages += 1
@@ -597,9 +659,11 @@ def fetch_drupal_change_records(source: dict, fetcher: DocumentationFetcher, doc
             if len(discovered_urls) >= max_records * 3:
                 break
 
-        time.sleep(0.2)
+        if listing_request_delay_seconds > 0:
+            time.sleep(listing_request_delay_seconds)
 
     sorted_urls = sorted(discovered_urls, key=lambda value: int(_extract_node_id(value) or 0), reverse=True)
+    candidate_urls = sorted_urls[: max(1, min(len(sorted_urls), max_records * 3))]
     written = 0
     bytes_written = 0
     parse_failures = 0
@@ -607,31 +671,37 @@ def fetch_drupal_change_records(source: dict, fetcher: DocumentationFetcher, doc
     reason_counts: dict[str, int] = {}
     inferred_status_count = 0
 
-    for record_url in sorted_urls:
-        if written >= max_records:
-            break
+    def _fetch_and_parse(record_url: str) -> dict[str, object]:
         try:
-            response = fetcher.session.get(record_url, timeout=30)
+            response = fetcher.session.get(record_url, timeout=record_request_timeout_seconds)
             response.raise_for_status()
         except Exception as exc:
-            parse_failures += 1
-            logger.error(f"Failed to fetch change record {record_url}: {exc}")
-            continue
+            return {"url": record_url, "accepted": False, "reason": "fetch_error", "error": str(exc), "parsed": {}}
+        if record_request_delay_seconds > 0:
+            time.sleep(record_request_delay_seconds)
 
-        parsed = _parse_change_record_page(
-            response.text,
-            record_url,
-            target_versions=target_versions,
-            lookback_cutoff=lookback_cutoff,
-        )
-        reason = str(parsed.get("reason", "unknown"))
+        parsed = _parse_change_record_page(response.text, record_url, target_versions=target_versions, lookback_cutoff=lookback_cutoff)
+        return {"url": record_url, "accepted": bool(parsed.get("accepted")), "reason": str(parsed.get("reason", "unknown")), "parsed": parsed}
+
+    def _apply_parsed(payload: dict[str, object]) -> None:
+        nonlocal parse_failures, written, bytes_written, inferred_status_count
+        reason = str(payload.get("reason", "unknown"))
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
-        if not bool(parsed.get("accepted")):
-            continue
+        if reason == "fetch_error":
+            parse_failures += 1
+            logger.error(f"Failed to fetch change record {payload.get('url')}: {payload.get('error')}")
+            return
+
+        parsed = payload.get("parsed", {})
+        if not isinstance(parsed, dict):
+            return
+        if not bool(payload.get("accepted")):
+            return
+
         parsed_status = str(parsed.get("status", "")).strip().lower()
         if required_status == "published" and parsed_status not in {"published", "published_inferred"}:
             reason_counts["status_filtered"] = reason_counts.get("status_filtered", 0) + 1
-            continue
+            return
 
         node_id = str(parsed.get("node_id") or "").strip()
         if not node_id or node_id == "unknown":
@@ -647,6 +717,18 @@ def fetch_drupal_change_records(source: dict, fetcher: DocumentationFetcher, doc
         bytes_written += len(markdown.encode("utf-8"))
         if str(parsed.get("status", "")) == "published_inferred":
             inferred_status_count += 1
+
+    if record_workers <= 1:
+        for record_url in candidate_urls:
+            if written >= max_records:
+                break
+            _apply_parsed(_fetch_and_parse(record_url))
+    else:
+        with ThreadPoolExecutor(max_workers=record_workers) as executor:
+            for payload in executor.map(_fetch_and_parse, candidate_urls):
+                if written >= max_records:
+                    break
+                _apply_parsed(payload)
 
     pruned_files = 0
     for existing in change_records_dir.glob("*.md"):
@@ -668,6 +750,7 @@ def fetch_drupal_change_records(source: dict, fetcher: DocumentationFetcher, doc
         "required_status": required_status,
         "reasons": reason_counts,
         "published_status_inferred": inferred_status_count,
+        "record_workers": record_workers,
     }
 
 
@@ -686,102 +769,101 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
 
     manifest = Manifest("acquisition", raw_dir)
     manifest.add_input("sources_manifest", "1.0", calculate_hash(sources_manifest_path))
+    acq_cfg = config.get("acquisition", {})
+    docs_cfg = acq_cfg.get("docs", {})
+    parallel_cfg = acq_cfg.get("parallel", {})
 
-    fetcher = DocumentationFetcher(logger, docs_dir)
-    success_count = 0
-    failure_count = 0
-    doc_pages_total = 0
-    fetch_status: list[dict] = []
-    zero_page_doc_sources = 0
-
-    docs_cfg = config.get("acquisition", {}).get("docs", {})
     max_pages_per_source = int(docs_cfg.get("max_pages_per_source", 200))
     allowed_prefixes_cfg = docs_cfg.get("allowed_prefixes", {})
     url_denylist_terms = [str(term).strip() for term in docs_cfg.get("url_denylist_terms", []) if str(term).strip()]
+    request_timeout_seconds = int(docs_cfg.get("request_timeout_seconds", 30))
+    request_delay_seconds = float(docs_cfg.get("request_delay_seconds", 0.3))
+    retry_backoff_seconds = float(docs_cfg.get("retry_backoff_seconds", 0.4))
+    max_retries = int(docs_cfg.get("max_retries", 2))
+    change_record_request_timeout_seconds = int(
+        docs_cfg.get("change_record_request_timeout_seconds", request_timeout_seconds)
+    )
+    change_record_request_delay_seconds = float(
+        docs_cfg.get("change_record_request_delay_seconds", request_delay_seconds)
+    )
+    change_record_listing_delay_seconds = float(
+        docs_cfg.get("change_record_listing_delay_seconds", min(0.2, request_delay_seconds))
+    )
+
+    git_workers = _clamp_workers(parallel_cfg.get("git_workers", 4), default=4, hard_max=12)
+    docs_workers = _clamp_workers(parallel_cfg.get("docs_workers", 2), default=2, hard_max=8)
+    change_record_workers = _clamp_workers(parallel_cfg.get("change_record_workers", 4), default=4, hard_max=12)
+
     excluded_source_ids = {
-        str(source_id).strip().lower()
-        for source_id in config.get("acquisition", {}).get("exclude_source_ids", [])
-        if str(source_id).strip()
+        str(source_id).strip().lower() for source_id in acq_cfg.get("exclude_source_ids", []) if str(source_id).strip()
     }
 
-    for source in sources_data.get("sources", {}).get("curated", []):
-        source_id = source["id"]
-        if str(source_id).strip().lower() in excluded_source_ids:
-            fetch_status.append(
-                {
-                    "source_id": source_id,
-                    "type": source.get("type", "unknown"),
-                    "success": True,
-                    "status": "skipped_excluded",
-                    "bytes": 0,
-                    "retried": 0,
-                }
-            )
-            continue
-        source_type = source["type"]
-        url = source["url"]
-        ref = source.get("ref")
+    curated_sources = list(sources_data.get("sources", {}).get("curated", []))
+    drupal_project_sources = list(sources_data.get("sources", {}).get("drupal_org_projects", []))
 
-        if source_type == "git":
-            target_dir = repos_dir / source_id
-            result = clone_or_fetch(url, ref, target_dir, logger)
-            if result.get("success"):
-                manifest.add_output(source_id, str(target_dir.relative_to(root)), str(result.get("commit")))
-                success_count += 1
-            else:
-                failure_count += 1
-            fetch_status.append(
-                {
-                    "source_id": source_id,
-                    "type": "git",
-                    "success": bool(result.get("success")),
-                    "status": "ok" if result.get("success") else "failed",
-                    "bytes": 0,
-                    "retried": int(result.get("retried", 0)),
-                    "action": result.get("action"),
-                    "commit": result.get("commit"),
-                }
-            )
-            continue
+    def _run_git_source(source: dict, default_ref: str | None = None) -> dict:
+        source_id = str(source.get("id"))
+        url = str(source.get("url"))
+        ref = source.get("ref", default_ref or "master")
+        target_dir = repos_dir / source_id
+        result = clone_or_fetch(url, ref, target_dir, logger)
+        payload = {
+            "source_id": source_id,
+            "type": "git",
+            "success": bool(result.get("success")),
+            "status": "ok" if result.get("success") else "failed",
+            "bytes": 0,
+            "retried": int(result.get("retried", 0)),
+            "action": result.get("action"),
+            "commit": result.get("commit"),
+            "pages": 0,
+            "manifest_output_path": str(target_dir.relative_to(root)),
+            "manifest_output_hash": str(result.get("commit")) if result.get("success") else None,
+        }
+        return payload
 
-        if source_type == "http":
-            allowed_prefixes = allowed_prefixes_cfg.get(source_id)
-            if not isinstance(allowed_prefixes, list) or not allowed_prefixes:
-                allowed_prefixes = _default_prefix_for_url(url)
+    def _build_fetcher() -> DocumentationFetcher:
+        return DocumentationFetcher(
+            logger,
+            docs_dir,
+            request_timeout_seconds=request_timeout_seconds,
+            request_delay_seconds=request_delay_seconds,
+            retry_backoff_seconds=retry_backoff_seconds,
+            max_retries=max_retries,
+        )
 
-            logger.info(
-                f"Starting recursive fetch for {source_id}",
-                source_id=source_id,
-                allowed_prefixes=allowed_prefixes,
-                max_pages=max_pages_per_source,
-                url_denylist_terms=url_denylist_terms,
-            )
-            result = fetcher.recursive_fetch(
-                url,
-                allowed_prefixes=allowed_prefixes,
-                max_pages=max_pages_per_source,
-                url_denylist_terms=url_denylist_terms,
-            )
-            doc_pages_total += int(result.get("pages", 0))
-            manifest.add_output(
-                source_id,
-                str((docs_dir / urlparse(url).netloc.replace(".", "_")).relative_to(root)),
-                "collection",
-            )
-            is_valid_doc_fetch = _doc_fetch_is_valid(result)
-            if is_valid_doc_fetch:
-                success_count += 1
-            else:
-                failure_count += 1
-                if int(result.get("pages", 0)) <= 0:
-                    zero_page_doc_sources += 1
+    def _run_doc_source(source: dict) -> dict:
+        source_id = str(source.get("id"))
+        source_type = str(source.get("type", "http"))
+        url = str(source.get("url", ""))
+        fetcher = _build_fetcher()
+        try:
+            if source_type == "http":
+                allowed_prefixes = allowed_prefixes_cfg.get(source_id)
+                if not isinstance(allowed_prefixes, list) or not allowed_prefixes:
+                    allowed_prefixes = _default_prefix_for_url(url)
 
-            fetch_status.append(
-                {
+                logger.info(
+                    f"Starting recursive fetch for {source_id}",
+                    source_id=source_id,
+                    allowed_prefixes=allowed_prefixes,
+                    max_pages=max_pages_per_source,
+                    url_denylist_terms=url_denylist_terms,
+                )
+                result = fetcher.recursive_fetch(
+                    url,
+                    allowed_prefixes=allowed_prefixes,
+                    max_pages=max_pages_per_source,
+                    url_denylist_terms=url_denylist_terms,
+                )
+                is_valid_doc_fetch = _doc_fetch_is_valid(result)
+                return {
                     "source_id": source_id,
                     "type": "http",
                     "success": is_valid_doc_fetch,
-                    "status": "ok" if is_valid_doc_fetch else "failed_zero_pages"
+                    "status": "ok"
+                    if is_valid_doc_fetch
+                    else "failed_zero_pages"
                     if int(result.get("pages", 0)) <= 0
                     else "failed",
                     "bytes": int(result.get("bytes", 0)),
@@ -790,39 +872,34 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
                     "failed_pages": int(result.get("failed_pages", 0)),
                     "allowed_prefixes": allowed_prefixes,
                     "url_denylist_terms": url_denylist_terms,
+                    "manifest_output_path": str((docs_dir / urlparse(url).netloc.replace(".", "_")).relative_to(root)),
+                    "manifest_output_hash": "collection",
                 }
-            )
-            continue
 
-        if source_type == "drupal_change_records":
-            logger.info(
-                f"Starting change record extraction for {source_id}",
-                source_id=source_id,
-                url=url,
-                max_list_pages=source.get("max_list_pages"),
-                max_records=source.get("max_records"),
-            )
-            result = fetch_drupal_change_records(source, fetcher, docs_dir, logger)
-            doc_pages_total += int(result.get("pages", 0))
-            manifest.add_output(
-                source_id,
-                str((docs_dir / "www_drupal_org" / "change_records").relative_to(root)),
-                "collection",
-            )
-            is_valid_doc_fetch = _doc_fetch_is_valid(result)
-            if is_valid_doc_fetch:
-                success_count += 1
-            else:
-                failure_count += 1
-                if int(result.get("pages", 0)) <= 0:
-                    zero_page_doc_sources += 1
+            if source_type == "drupal_change_records":
+                change_record_source = dict(source)
+                change_record_source.setdefault("parallel_workers", change_record_workers)
+                change_record_source.setdefault("record_request_timeout_seconds", change_record_request_timeout_seconds)
+                change_record_source.setdefault("record_request_delay_seconds", change_record_request_delay_seconds)
+                change_record_source.setdefault("listing_request_delay_seconds", change_record_listing_delay_seconds)
 
-            fetch_status.append(
-                {
+                logger.info(
+                    f"Starting change record extraction for {source_id}",
+                    source_id=source_id,
+                    url=url,
+                    max_list_pages=source.get("max_list_pages"),
+                    max_records=source.get("max_records"),
+                    worker_count=change_record_workers,
+                )
+                result = fetch_drupal_change_records(change_record_source, fetcher, docs_dir, logger)
+                is_valid_doc_fetch = _doc_fetch_is_valid(result)
+                return {
                     "source_id": source_id,
                     "type": "drupal_change_records",
                     "success": is_valid_doc_fetch,
-                    "status": "ok" if is_valid_doc_fetch else "failed_zero_pages"
+                    "status": "ok"
+                    if is_valid_doc_fetch
+                    else "failed_zero_pages"
                     if int(result.get("pages", 0)) <= 0
                     else "failed",
                     "bytes": int(result.get("bytes", 0)),
@@ -837,44 +914,231 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
                     "required_status": result.get("required_status", ""),
                     "reasons": result.get("reasons", {}),
                     "published_status_inferred": int(result.get("published_status_inferred", 0)),
+                    "record_workers": int(result.get("record_workers", change_record_workers)),
+                    "manifest_output_path": str((docs_dir / "www_drupal_org" / "change_records").relative_to(root)),
+                    "manifest_output_hash": "collection",
                 }
-            )
 
-    for source in sources_data.get("sources", {}).get("drupal_org_projects", []):
-        source_id = source["id"]
-        if str(source_id).strip().lower() in excluded_source_ids:
-            fetch_status.append(
-                {
-                    "source_id": source_id,
-                    "type": source.get("type", "git"),
-                    "success": True,
-                    "status": "skipped_excluded",
-                    "bytes": 0,
-                    "retried": 0,
-                }
-            )
+            return {
+                "source_id": source_id,
+                "type": source_type,
+                "success": False,
+                "status": "unsupported_source_type",
+                "bytes": 0,
+                "retried": 0,
+                "pages": 0,
+                "failed_pages": 0,
+                "manifest_output_path": None,
+                "manifest_output_hash": None,
+            }
+        finally:
+            fetcher.session.close()
+
+    git_job_inputs: list[tuple[dict, str | None]] = []
+    doc_job_inputs: list[dict] = []
+
+    for source in curated_sources:
+        if str(source.get("id", "")).strip().lower() in excluded_source_ids:
             continue
-        url = source["url"]
-        ref = source.get("ref", "master")
-        target_dir = repos_dir / source_id
-        result = clone_or_fetch(url, ref, target_dir, logger)
-        if result.get("success"):
-            manifest.add_output(source_id, str(target_dir.relative_to(root)), str(result.get("commit")))
+        source_type = str(source.get("type", "")).strip()
+        if source_type == "git":
+            git_job_inputs.append((source, None))
+        elif source_type in {"http", "drupal_change_records"}:
+            doc_job_inputs.append(source)
+
+    for source in drupal_project_sources:
+        if str(source.get("id", "")).strip().lower() in excluded_source_ids:
+            continue
+        git_job_inputs.append((source, "master"))
+
+    git_results: dict[str, dict] = {}
+    if git_job_inputs:
+        logger.info(
+            "Running git acquisition tasks.",
+            worker_count=git_workers,
+            task_count=len(git_job_inputs),
+        )
+        with ThreadPoolExecutor(max_workers=git_workers) as executor:
+            future_to_source_id = {
+                executor.submit(_run_git_source, source, default_ref): str(source.get("id"))
+                for source, default_ref in git_job_inputs
+            }
+            for future in as_completed(future_to_source_id):
+                source_id = future_to_source_id[future]
+                try:
+                    git_results[source_id] = future.result()
+                except Exception as exc:
+                    logger.error("Git acquisition task failed.", source_id=source_id, error=str(exc))
+                    git_results[source_id] = {
+                        "source_id": source_id,
+                        "type": "git",
+                        "success": False,
+                        "status": "failed_exception",
+                        "bytes": 0,
+                        "retried": 0,
+                        "action": None,
+                        "commit": None,
+                        "pages": 0,
+                        "manifest_output_path": str((repos_dir / source_id).relative_to(root)),
+                        "manifest_output_hash": None,
+                    }
+
+    doc_results: dict[str, dict] = {}
+    if doc_job_inputs:
+        logger.info(
+            "Running documentation acquisition tasks.",
+            worker_count=docs_workers,
+            task_count=len(doc_job_inputs),
+        )
+        if docs_workers <= 1:
+            for source in doc_job_inputs:
+                source_id = str(source.get("id"))
+                try:
+                    doc_results[source_id] = _run_doc_source(source)
+                except Exception as exc:
+                    logger.error("Documentation acquisition task failed.", source_id=source_id, error=str(exc))
+                    doc_results[source_id] = {
+                        "source_id": source_id,
+                        "type": str(source.get("type", "http")),
+                        "success": False,
+                        "status": "failed_exception",
+                        "bytes": 0,
+                        "retried": 0,
+                        "pages": 0,
+                        "failed_pages": 1,
+                        "manifest_output_path": None,
+                        "manifest_output_hash": None,
+                    }
+        else:
+            with ThreadPoolExecutor(max_workers=docs_workers) as executor:
+                future_to_source_id = {executor.submit(_run_doc_source, source): str(source.get("id")) for source in doc_job_inputs}
+                for future in as_completed(future_to_source_id):
+                    source_id = future_to_source_id[future]
+                    try:
+                        doc_results[source_id] = future.result()
+                    except Exception as exc:
+                        logger.error("Documentation acquisition task failed.", source_id=source_id, error=str(exc))
+                        doc_results[source_id] = {
+                            "source_id": source_id,
+                            "type": "http",
+                            "success": False,
+                            "status": "failed_exception",
+                            "bytes": 0,
+                            "retried": 0,
+                            "pages": 0,
+                            "failed_pages": 1,
+                            "manifest_output_path": None,
+                            "manifest_output_hash": None,
+                        }
+
+    success_count = 0
+    failure_count = 0
+    doc_pages_total = 0
+    zero_page_doc_sources = 0
+    fetch_status: list[dict] = []
+
+    def _append_status(payload: dict) -> None:
+        nonlocal success_count, failure_count, doc_pages_total, zero_page_doc_sources
+        payload = dict(payload)
+        source_type = str(payload.get("type", "unknown"))
+        is_success = bool(payload.get("success"))
+        status = str(payload.get("status", ""))
+        pages = int(payload.get("pages", 0))
+
+        if status == "skipped_excluded":
+            pass
+        elif is_success:
             success_count += 1
         else:
             failure_count += 1
 
-        fetch_status.append(
-            {
-                "source_id": source_id,
-                "type": "git",
-                "success": bool(result.get("success")),
-                "status": "ok" if result.get("success") else "failed",
-                "bytes": 0,
-                "retried": int(result.get("retried", 0)),
-                "action": result.get("action"),
-                "commit": result.get("commit"),
-            }
+        if source_type in {"http", "drupal_change_records"}:
+            doc_pages_total += pages
+            if status != "skipped_excluded" and not is_success and pages <= 0:
+                zero_page_doc_sources += 1
+
+        output_path = payload.pop("manifest_output_path", None)
+        output_hash = payload.pop("manifest_output_hash", None)
+        source_id = str(payload.get("source_id"))
+        if is_success and output_path and output_hash:
+            manifest.add_output(source_id, output_path, output_hash)
+        fetch_status.append(payload)
+
+    for source in curated_sources:
+        source_id = str(source.get("id"))
+        source_type = str(source.get("type", "unknown"))
+        if source_id.strip().lower() in excluded_source_ids:
+            _append_status(
+                {
+                    "source_id": source_id,
+                    "type": source_type,
+                    "success": True,
+                    "status": "skipped_excluded",
+                    "bytes": 0,
+                    "retried": 0,
+                    "pages": 0,
+                    "manifest_output_path": None,
+                    "manifest_output_hash": None,
+                }
+            )
+            continue
+        if source_type == "git":
+            _append_status(git_results.get(source_id, {"source_id": source_id, "type": "git", "success": False, "status": "missing_result"}))
+        elif source_type in {"http", "drupal_change_records"}:
+            _append_status(
+                doc_results.get(
+                    source_id,
+                    {"source_id": source_id, "type": source_type, "success": False, "status": "missing_result", "pages": 0},
+                )
+            )
+        else:
+            _append_status(
+                {
+                    "source_id": source_id,
+                    "type": source_type,
+                    "success": False,
+                    "status": "unsupported_source_type",
+                    "bytes": 0,
+                    "retried": 0,
+                    "pages": 0,
+                    "manifest_output_path": None,
+                    "manifest_output_hash": None,
+                }
+            )
+
+    for source in drupal_project_sources:
+        source_id = str(source.get("id"))
+        source_type = str(source.get("type", "git"))
+        if source_id.strip().lower() in excluded_source_ids:
+            _append_status(
+                {
+                    "source_id": source_id,
+                    "type": source_type,
+                    "success": True,
+                    "status": "skipped_excluded",
+                    "bytes": 0,
+                    "retried": 0,
+                    "pages": 0,
+                    "manifest_output_path": None,
+                    "manifest_output_hash": None,
+                }
+            )
+            continue
+        _append_status(
+            git_results.get(
+                source_id,
+                {
+                    "source_id": source_id,
+                    "type": "git",
+                    "success": False,
+                    "status": "missing_result",
+                    "bytes": 0,
+                    "retried": 0,
+                    "pages": 0,
+                    "manifest_output_path": str((repos_dir / source_id).relative_to(root)),
+                    "manifest_output_hash": None,
+                },
+            )
         )
 
     manifest.data["fetch_status"] = fetch_status
@@ -884,8 +1148,11 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
             "failure_count": failure_count,
             "doc_pages_captured": doc_pages_total,
             "zero_page_doc_sources": zero_page_doc_sources,
-            "total_repos": len(sources_data.get("sources", {}).get("drupal_org_projects", []))
-            + sum(1 for source in sources_data.get("sources", {}).get("curated", []) if source.get("type") == "git"),
+            "git_workers": git_workers,
+            "docs_workers": docs_workers,
+            "change_record_workers": change_record_workers,
+            "total_repos": len(drupal_project_sources)
+            + sum(1 for source in curated_sources if source.get("type") == "git"),
         }
     )
 

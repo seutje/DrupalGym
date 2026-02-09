@@ -105,6 +105,12 @@ command -v phpstan
 ## Configuration
 Pipeline behavior is controlled by `pipeline.yaml`. Key knobs include:
 `sources` (Drupal.org API discovery + curated sources), `dataset.targets` (train/valid/test split), `seed`, and the `models` list.
+For stages 1-5 throughput tuning, use:
+- `sources.rate_limit` + `sources.parallel.composer_workers`
+- `acquisition.parallel.{git_workers,docs_workers,change_record_workers}` and `acquisition.docs` request timing knobs
+- `normalization.parallel.read_workers`
+- `sft_generation.parallel.read_workers`
+- `quality.runtime_check_workers`
 
 ## Usage
 
@@ -162,7 +168,7 @@ Command:
 python3 -m pipeline run 1
 ```
 Prereqs: network access to Drupal.org and other curated sources.
-What it does: queries the Drupal.org project API, filters for Drupal 11 compatibility, and writes a consolidated manifest.
+What it does: queries the Drupal.org project API, filters for Drupal 11 compatibility, and writes a consolidated manifest. Composer metadata checks run with bounded parallel workers and shared request throttling.
 Outputs: `sources/manifest.json`.
 
 **Stage 2: Acquisition**
@@ -171,7 +177,7 @@ Command:
 python3 -m pipeline run 2
 ```
 Prereqs: `sources/manifest.json`, network access, `git` on PATH.
-What it does: clones or fetches repos into `raw/repos/` and crawls selected docs into `raw/docs/`.
+What it does: clones or fetches repos into `raw/repos/` and crawls selected docs into `raw/docs/`. Git fetch/clone and doc source tasks use bounded worker pools, and doc requests use configurable delay/retry controls.
 Outputs: `raw/manifest.json`, `raw/repos/`, `raw/docs/`.
 
 **Stage 3: Normalization and Deduplication**
@@ -180,7 +186,7 @@ Command:
 python3 -m pipeline run 3
 ```
 Prereqs: `raw/manifest.json`.
-What it does: normalizes text and code, strips boilerplate, converts HTML docs to Markdown, and deduplicates.
+What it does: normalizes text and code, strips boilerplate, converts HTML docs to Markdown, and deduplicates. File preparation runs in parallel while dedup/write application remains deterministic.
 Outputs: cleaned files under `clean/` and `clean/dedup_manifest.json`.
 
 **Stage 4: SFT Generation**
@@ -189,7 +195,7 @@ Command:
 python3 -m pipeline run 4
 ```
 Prereqs: `clean/` data.
-What it does: generates instruction samples from code and docs using template logic.
+What it does: preloads clean files with bounded parallel reads, then generates instruction samples from code and docs using deterministic template logic.
 Outputs: `sft/combined.jsonl`.
 
 **Stage 5: Quality Gates**
@@ -198,7 +204,7 @@ Command:
 python3 -m pipeline run 5
 ```
 Prereqs: `sft/combined.jsonl`.
-What it does: applies heuristics to filter low-quality or irrelevant samples.
+What it does: applies heuristics to filter low-quality or irrelevant samples. Optional runtime checks (`php -l`, `phpcs`, `phpstan`) are executed in parallel per sample with deterministic rejection ordering.
 Outputs: `quality/passed.jsonl`, `quality/rejected.jsonl`, `quality/report.json`.
 
 **Stage 6: Dataset Packaging**

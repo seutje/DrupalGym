@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -9,6 +10,21 @@ from markdownify import markdownify as md
 
 from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
+
+SKIPPED_BINARY_SUFFIXES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".svg",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+}
+NULL_BYTE_TEXT_SUFFIX_ALLOWLIST = {".php", ".module", ".inc"}
+PHP_LIKE_SUFFIXES = {".php", ".module", ".inc", ".install", ".profile", ".theme"}
 
 
 class Normalizer:
@@ -188,114 +204,129 @@ class Normalizer:
             key = (block, (fingerprint >> shift) & 0xFFFF)
             lsh.setdefault(key, []).append(idx)
 
-    def process_file(self, raw_path: Path, clean_dir: Path, root: Path) -> bool:
-        self.stats["total_files"] += 1
-
-        if raw_path.suffix.lower() in [
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".ico",
-            ".svg",
-            ".woff",
-            ".woff2",
-            ".ttf",
-            ".eot",
-        ]:
-            return False
+    def prepare_file(self, raw_path: Path, root: Path) -> dict:
+        suffix = raw_path.suffix.lower()
+        if suffix in SKIPPED_BINARY_SUFFIXES:
+            return {"status": "skip"}
 
         try:
             with open(raw_path, "rb") as handle:
                 raw_bytes = handle.read()
+        except Exception as exc:
+            return {"status": "error", "path": str(raw_path), "error": str(exc)}
 
-            if b"\x00" in raw_bytes and raw_path.suffix.lower() not in [".php", ".module", ".inc"]:
-                return False
+        if b"\x00" in raw_bytes and suffix not in NULL_BYTE_TEXT_SUFFIX_ALLOWLIST:
+            return {"status": "skip"}
 
-            content = raw_bytes.decode("utf-8", errors="ignore")
-            original_size = len(raw_bytes)
+        content = raw_bytes.decode("utf-8", errors="ignore")
+        original_size = len(raw_bytes)
 
-            if raw_path.suffix.lower() == ".html":
-                content = self.clean_html(content)
-                if len(content) < 200:
-                    self.stats["rejected_files"] += 1
-                    return False
-                doc_lower = content.lower()
-                if "drupal 7" in doc_lower and "drupal 11" not in doc_lower and "drupal 10" not in doc_lower:
-                    if "benchmarking and profiling drupal" not in doc_lower:
-                        self.stats["rejected_files"] += 1
-                        return False
+        if suffix == ".html":
+            content = self.clean_html(content)
+            if len(content) < 200:
+                return {"status": "reject"}
+            doc_lower = content.lower()
+            if "drupal 7" in doc_lower and "drupal 11" not in doc_lower and "drupal 10" not in doc_lower:
+                if "benchmarking and profiling drupal" not in doc_lower:
+                    return {"status": "reject"}
+        elif suffix in PHP_LIKE_SUFFIXES:
+            content = self.strip_php_license(content)
 
-            elif raw_path.suffix.lower() in [".php", ".module", ".inc", ".install", ".profile", ".theme"]:
-                content = self.strip_php_license(content)
+        content = self.normalize_text(content)
+        rel_path = raw_path.relative_to(root / "raw")
+        rel_path_str = str(rel_path)
 
-            content = self.normalize_text(content)
-            family = self._content_family(raw_path)
+        return {
+            "status": "prepared",
+            "path": raw_path,
+            "rel_path": rel_path,
+            "rel_path_str": rel_path_str,
+            "family": self._content_family(raw_path),
+            "content": content,
+            "original_size": original_size,
+            "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        }
 
-            rel_path = raw_path.relative_to(root / "raw")
-            rel_path_str = str(rel_path)
-            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    def _apply_prepared(self, prepared: dict, clean_dir: Path) -> bool:
+        rel_path = prepared["rel_path"]
+        rel_path_str = prepared["rel_path_str"]
+        family = prepared["family"]
+        content = prepared["content"]
+        content_hash = prepared["content_hash"]
+        original_size = int(prepared["original_size"])
 
-            if self.exact_hash_enabled and content_hash in self.seen_hashes:
-                canonical_source, canonical_family = self.seen_hashes[content_hash]
-                self.stats["deduplicated_files"] += 1
-                self.stats["bytes_saved"] += original_size
-                self.dedup_entries.append(
-                    {
-                        "path": rel_path_str,
-                        "canonical_source": canonical_source,
-                        "family": canonical_family,
-                        "dup_type": "exact",
-                        "similarity_score": 1.0,
-                        "hash": content_hash,
-                    }
-                )
-                return False
-
-            if self.near_dup_enabled and self.near_dup_method == "simhash_5gram":
-                fingerprint = self._simhash_5gram(content)
-                near_path, similarity = self._near_duplicate_of(family, fingerprint)
-                if near_path and similarity >= self.near_dup_threshold:
-                    self.stats["near_deduplicated_files"] += 1
-                    self.stats["bytes_saved"] += original_size
-                    self.dedup_entries.append(
-                        {
-                            "path": rel_path_str,
-                            "canonical_source": near_path,
-                            "family": family,
-                            "dup_type": "near",
-                            "similarity_score": round(similarity, 4),
-                            "hash": content_hash,
-                        }
-                    )
-                    return False
-                self._register_fingerprint(family, fingerprint, rel_path_str)
-
-            target_path = clean_dir / rel_path
-            if target_path.suffix.lower() == ".html":
-                target_path = target_path.with_suffix(".md")
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(target_path, "w", encoding="utf-8") as handle:
-                handle.write(content)
-
-            self.seen_hashes[content_hash] = (rel_path_str, family)
+        if self.exact_hash_enabled and content_hash in self.seen_hashes:
+            canonical_source, canonical_family = self.seen_hashes[content_hash]
+            self.stats["deduplicated_files"] += 1
+            self.stats["bytes_saved"] += original_size
             self.dedup_entries.append(
                 {
                     "path": rel_path_str,
-                    "canonical_source": rel_path_str,
-                    "family": family,
-                    "dup_type": "canonical",
+                    "canonical_source": canonical_source,
+                    "family": canonical_family,
+                    "dup_type": "exact",
                     "similarity_score": 1.0,
                     "hash": content_hash,
                 }
             )
-            self.stats["processed_files"] += 1
-            return True
-
-        except Exception as exc:
-            self.logger.error(f"Error processing {raw_path}: {str(exc)}")
             return False
+
+        if self.near_dup_enabled and self.near_dup_method == "simhash_5gram":
+            fingerprint = self._simhash_5gram(content)
+            near_path, similarity = self._near_duplicate_of(family, fingerprint)
+            if near_path and similarity >= self.near_dup_threshold:
+                self.stats["near_deduplicated_files"] += 1
+                self.stats["bytes_saved"] += original_size
+                self.dedup_entries.append(
+                    {
+                        "path": rel_path_str,
+                        "canonical_source": near_path,
+                        "family": family,
+                        "dup_type": "near",
+                        "similarity_score": round(similarity, 4),
+                        "hash": content_hash,
+                    }
+                )
+                return False
+            self._register_fingerprint(family, fingerprint, rel_path_str)
+
+        target_path = clean_dir / rel_path
+        if target_path.suffix.lower() == ".html":
+            target_path = target_path.with_suffix(".md")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(target_path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+
+        self.seen_hashes[content_hash] = (rel_path_str, family)
+        self.dedup_entries.append(
+            {
+                "path": rel_path_str,
+                "canonical_source": rel_path_str,
+                "family": family,
+                "dup_type": "canonical",
+                "similarity_score": 1.0,
+                "hash": content_hash,
+            }
+        )
+        self.stats["processed_files"] += 1
+        return True
+
+    def consume_prepared(self, prepared: dict, clean_dir: Path) -> bool:
+        status = prepared.get("status")
+        if status == "prepared":
+            return self._apply_prepared(prepared, clean_dir)
+        if status == "reject":
+            self.stats["rejected_files"] += 1
+            return False
+        if status == "error":
+            self.logger.error(f"Error processing {prepared.get('path')}: {prepared.get('error')}")
+        return False
+
+    def process_file(self, raw_path: Path, clean_dir: Path, root: Path) -> bool:
+        self.stats["total_files"] += 1
+        prepared = self.prepare_file(raw_path, root)
+        return self.consume_prepared(prepared, clean_dir)
 
 
 def run_normalization_stage(config: dict, logger: PipelineLogger, root: Path):
@@ -311,13 +342,27 @@ def run_normalization_stage(config: dict, logger: PipelineLogger, root: Path):
     manifest.add_input("raw_manifest", "1.0", calculate_hash(raw_manifest_path))
 
     dedup_cfg = config.get("normalization", {}).get("dedup", {})
+    parallel_cfg = config.get("normalization", {}).get("parallel", {})
+    default_read_workers = max(1, min(8, (os.cpu_count() or 2) - 1))
+    read_workers = max(1, int(parallel_cfg.get("read_workers", default_read_workers)))
     normalizer = Normalizer(logger, dedup_cfg=dedup_cfg)
 
     raw_root = root / "raw"
+    raw_paths: list[Path] = []
     for dirpath, _, filenames in os.walk(raw_root):
         for filename in filenames:
-            raw_path = Path(dirpath) / filename
-            normalizer.process_file(raw_path, clean_dir, root)
+            raw_paths.append(Path(dirpath) / filename)
+    raw_paths.sort(key=lambda path: str(path.relative_to(raw_root)))
+    normalizer.stats["total_files"] += len(raw_paths)
+
+    if read_workers <= 1:
+        for raw_path in raw_paths:
+            prepared = normalizer.prepare_file(raw_path, root)
+            normalizer.consume_prepared(prepared, clean_dir)
+    else:
+        with ThreadPoolExecutor(max_workers=read_workers) as executor:
+            for prepared in executor.map(lambda path: normalizer.prepare_file(path, root), raw_paths):
+                normalizer.consume_prepared(prepared, clean_dir)
 
     manifest.set_metrics(normalizer.stats)
 

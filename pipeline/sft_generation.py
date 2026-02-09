@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .logger import PipelineLogger
@@ -23,6 +24,22 @@ CHANGE_RECORD_PAIR_RE = re.compile(
 )
 CHANGE_RECORD_METADATA_RE = re.compile(r"(?mi)^-\s*([A-Za-z ]+):\s*(.+)$")
 CHANGE_RECORD_RATIONALE_RE = re.compile(r"(?is)##\s*Rationale\s*(.*?)(?:\n##\s*Before|\Z)")
+
+
+def _read_clean_file(clean_path: Path, clean_dir: Path) -> dict:
+    rel_path = str(clean_path.relative_to(clean_dir))
+    try:
+        with open(clean_path, "r", encoding="utf-8") as handle:
+            content = handle.read()
+        return {
+            "status": "ok",
+            "rel_path": rel_path,
+            "suffix": clean_path.suffix.lower(),
+            "content": content,
+            "path": str(clean_path),
+        }
+    except Exception as exc:
+        return {"status": "error", "rel_path": rel_path, "path": str(clean_path), "error": str(exc)}
 
 
 class InstructionGenerator:
@@ -614,12 +631,16 @@ def run_sft_generation_stage(config: dict, logger: PipelineLogger, root: Path):
         for prefix in sft_cfg.get("exclude_source_prefixes", [])
         if str(prefix).strip()
     ]
+    parallel_cfg = sft_cfg.get("parallel", {})
+    default_read_workers = max(1, min(8, (os.cpu_count() or 2) - 1))
+    read_workers = max(1, int(parallel_cfg.get("read_workers", default_read_workers)))
     enable_sdc_bundle_generation = bool(sft_cfg.get("enable_sdc_bundle_generation", True))
 
     generator = InstructionGenerator(logger, config=sft_cfg)
     content_by_rel_path: dict[str, str] = {}
     discovered_paths: list[str] = []
 
+    candidate_paths: list[Path] = []
     for dirpath, _, filenames in os.walk(clean_dir):
         for filename in filenames:
             if filename == "dedup_manifest.json":
@@ -633,26 +654,45 @@ def run_sft_generation_stage(config: dict, logger: PipelineLogger, root: Path):
             rel_path_lower = rel_path.lower()
             if any(rel_path_lower.startswith(prefix) for prefix in exclude_source_prefixes):
                 continue
-            try:
-                with open(clean_path, "r", encoding="utf-8") as handle:
-                    content = handle.read()
-                content_by_rel_path[rel_path] = content
-                discovered_paths.append(rel_path)
+            candidate_paths.append(clean_path)
 
-                suffix = clean_path.suffix.lower()
-                if suffix in {".php", ".module", ".inc", ".install", ".theme"}:
-                    generator.generate_from_php(content, rel_path)
-                elif suffix == ".yml":
-                    generator.generate_from_yaml(content, rel_path)
-                elif suffix == ".twig":
-                    generator.generate_from_twig(content, rel_path)
-                elif suffix in {".md", ".txt", ".html"}:
-                    generator.generate_from_doc(content, rel_path)
-            except Exception as exc:
-                logger.error(f"Error generating SFT samples for {clean_path}: {str(exc)}")
+    candidate_paths.sort(key=lambda path: str(path.relative_to(clean_dir)))
+
+    if read_workers <= 1:
+        read_results = (_read_clean_file(path, clean_dir) for path in candidate_paths)
+    else:
+        executor = ThreadPoolExecutor(max_workers=read_workers)
+        read_results = executor.map(lambda path: _read_clean_file(path, clean_dir), candidate_paths)
+
+    try:
+        for read_result in read_results:
+            if read_result.get("status") != "ok":
+                logger.error(
+                    f"Error generating SFT samples for {read_result.get('path')}: {read_result.get('error')}"
+                )
+                continue
+
+            rel_path = str(read_result.get("rel_path"))
+            suffix = str(read_result.get("suffix", ""))
+            content = str(read_result.get("content", ""))
+
+            content_by_rel_path[rel_path] = content
+            discovered_paths.append(rel_path)
+
+            if suffix in {".php", ".module", ".inc", ".install", ".theme"}:
+                generator.generate_from_php(content, rel_path)
+            elif suffix == ".yml":
+                generator.generate_from_yaml(content, rel_path)
+            elif suffix == ".twig":
+                generator.generate_from_twig(content, rel_path)
+            elif suffix in {".md", ".txt", ".html"}:
+                generator.generate_from_doc(content, rel_path)
+    finally:
+        if read_workers > 1:
+            executor.shutdown(wait=True)
 
     if enable_sdc_bundle_generation:
-        for rel_path in discovered_paths:
+        for rel_path in sorted(discovered_paths):
             rel_path_lower = rel_path.lower()
             if not rel_path_lower.endswith((".yml", ".twig")):
                 continue
