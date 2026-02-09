@@ -1,39 +1,39 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-09T15:05:53Z",
+  "timestamp": "2026-02-09T17:05:57Z",
   "inputs": [
     {
       "name": "v1_train",
       "version": "v1",
-      "hash": "7085f91395b625cce6464ce6246d307cc55882f801002ed462ce0ccfc73511e6"
+      "hash": "4bcb3c543805d4ce38e4e415f263e8bdad2267b8f24e865de07ebd30c5f57875"
     },
     {
       "name": "v1_valid",
       "version": "v1",
-      "hash": "ae59d0f480ef8bdc1b142c9fe1b8af791291fe3ebe829d3fe983a222177383da"
+      "hash": "21ae2e70ca413f4f0b02b2030013446a4a25122a0d638bb5c17b7650dd093109"
     },
     {
       "name": "v1_test",
       "version": "v1",
-      "hash": "ecec0d78b9ca680a5baf359b408fe56fba4de35647d9508a592f54232108d0fd"
+      "hash": "8f18a3526cd4e0fb2df01efffa56592e8753563e47c2384d48e766697dc56101"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "0fb02ebe7395e028ee3e8ae6454d370fb41fb23ee4aec7e1635cf1a45c976afe"
+      "hash": "885bc9dafa94f7130a5965655446b36eb2faf3a84fd94636561fb75bb990c540"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "ca1a73fa3440e94c5ba49e36ed78be73ed0baa75d07694762e1102e4a647ec97"
+      "hash": "d6c56ea8c95ca784d5c98d219a0b3e5df277cd0d1430550a6c205fb6a6055225"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "7ae9a854751133c556e74d9ae8895803a368e4b38af03b00a6b749afc2ce384d"
+      "hash": "faf833e79bf1cb298b13acbb83602db2d17ad5e5e33e24efce593b82938d0265"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "e2b654c959566db04255259cb64c63f73ff6487b0f0b388b0aee2632c85d5cd8"
+      "hash": "2e6b2e14c01d7af7ac509fc3230277f59f24e479e3e957b8bc513fa6bc3a42c7"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
@@ -41,26 +41,26 @@
     },
     "training_pool_clean": {
       "path": "dataset/v2/training_pool_clean.jsonl",
-      "hash": "b0a7ef9870e55bbab37d18b634eebd218333c6d0a5f957caf2a979538107d7bd"
+      "hash": "fe35f28c4b5cf713c2cc394fd66be941dfff3993a32eb434902fd3653f635d34"
     },
     "training_pool_experimental": {
       "path": "dataset/v2/training_pool_experimental.jsonl",
-      "hash": "211c9fb73667cc685ece48fcce96086d1f5f3b5a566d37bae0a851b89c124e40"
+      "hash": "cd77ac5f15e313fef2f77effc493fcfe5964f06f99dc7a514ecad173f4e5641f"
     },
     "quality_scorecard": {
       "path": "dataset/v2/quality_scorecard.json",
-      "hash": "b7736caac353a84ca3a82faf5fbeb1c56542bd94fecd98994475e6f8ff5e4ac6"
+      "hash": "032a9c02b816c384d8fbcf86e4c334582469a9378b4bfd9fcd9287ded884083f"
     }
   },
   "metrics": {
     "input_total": 11231,
-    "filtered_total": 9853,
-    "output_char_filtered_total": 9853,
+    "filtered_total": 9854,
+    "output_char_filtered_total": 9854,
     "chunked_source_records": 0,
     "char_chunked_source_records": 0,
-    "chunked_total_records": 9853,
-    "rebalanced_total_records": 6825,
-    "dropped_test_records": 3028,
+    "chunked_total_records": 9854,
+    "rebalanced_total_records": 6827,
+    "dropped_test_records": 3027,
     "augmented_records": 1726,
     "augmentation_candidate_pool": 1726,
     "normalized_output_dedup_dropped": 1295,
@@ -70,17 +70,17 @@
     "ambiguous_samples": 0,
     "ambiguous_pair_ratio": 0.0,
     "empty_input_share_by_type": {
-      "yaml_reference": 0.0,
       "code_reference": 0.0,
+      "yaml_reference": 0.0,
+      "sdc_reference": 0.0,
       "twig_reference": 0.0,
-      "doc_summary": 0.0,
-      "sdc_reference": 0.0
+      "doc_summary": 0.0
     },
     "source_share_cap_dropped": 0,
-    "final_total": 7256,
-    "test_ratio_before_rebalance": 0.619,
+    "final_total": 7258,
+    "test_ratio_before_rebalance": 0.6189,
     "test_ratio_after_rebalance": 0.45,
-    "split_train": 5804,
+    "split_train": 5806,
     "split_valid": 725,
     "split_test": 727,
     "eval_candidate_pool_size": 0,
@@ -91,65 +91,70 @@
     ],
     "yield_breakdown": {
       "input_records": 11231,
-      "after_validation_filter": 9853,
-      "after_output_char_filter": 9853,
-      "after_chunking": 9853,
-      "after_test_pool_extraction": 6825,
-      "after_augmentation": 8551,
-      "after_normalized_output_dedup": 7256,
-      "after_source_share_cap": 7256,
-      "rejected_records": 5701
+      "after_validation_filter": 9854,
+      "after_output_char_filter": 9854,
+      "after_chunking": 9854,
+      "after_test_pool_extraction": 6827,
+      "after_augmentation": 8553,
+      "after_normalized_output_dedup": 7258,
+      "after_source_share_cap": 7258,
+      "rejected_records": 5699
     },
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
       "weak_categories": [
-        "routing"
+        "routing",
+        "di"
       ],
       "details": [
         {
           "category": "routing",
           "negative_prompt_count": 1,
-          "avg_delta": -0.2
+          "avg_delta": -0.3
+        },
+        {
+          "category": "di",
+          "negative_prompt_count": 1,
+          "avg_delta": -0.1
         }
       ]
     },
     "rejection_reasons": {
       "missing_drupal11_attribute_or_di_pattern": 1330,
-      "class_interface_mismatch": 27,
-      "retrieval_symbol_declaration_missing": 12,
       "class_enum_mismatch": 1,
+      "class_interface_mismatch": 27,
       "truncation_artifact": 5,
+      "retrieval_symbol_declaration_missing": 12,
       "class_trait_mismatch": 2,
-      "special_token_artifact": 1,
-      "test_rebalance_drop": 3028,
-      "augmentation_non_php_source": 2028,
-      "augmentation_from_test_source": 3071,
+      "test_rebalance_drop": 3027,
+      "augmentation_non_php_source": 2029,
+      "augmentation_from_test_source": 3072,
       "normalized_output_dedupe_drop": 1295
     },
     "sample_type_distribution": {
-      "retrieval": 5530,
-      "refactor": 432,
       "explain_and_implement": 431,
-      "bugfix": 432,
-      "write_from_spec": 431
+      "retrieval": 5532,
+      "refactor": 432,
+      "write_from_spec": 431,
+      "bugfix": 432
     },
-    "clean_pool_size": 6825,
+    "clean_pool_size": 6827,
     "experimental_pool_size": 1726,
     "source_concentration_top10": [
       {
         "source_prefix": "repos/drupal_core",
-        "count": 6333,
-        "share": 0.8728
+        "count": 6356,
+        "share": 0.8757
       },
       {
         "source_prefix": "repos/display_builder",
-        "count": 349,
-        "share": 0.0481
+        "count": 346,
+        "share": 0.0477
       },
       {
         "source_prefix": "docs/www_drupal_org",
-        "count": 195,
-        "share": 0.0269
+        "count": 196,
+        "share": 0.027
       },
       {
         "source_prefix": "docs/api_drupal_org",
@@ -163,46 +168,46 @@
       },
       {
         "source_prefix": "repos/webprofiler",
-        "count": 67,
-        "share": 0.0092
-      },
-      {
-        "source_prefix": "repos/commerce_referral",
-        "count": 24,
-        "share": 0.0033
+        "count": 58,
+        "share": 0.008
       },
       {
         "source_prefix": "repos/pinto_layout",
-        "count": 22,
-        "share": 0.003
+        "count": 21,
+        "share": 0.0029
+      },
+      {
+        "source_prefix": "repos/commerce_referral",
+        "count": 21,
+        "share": 0.0029
       },
       {
         "source_prefix": "repos/queue_manager",
-        "count": 14,
-        "share": 0.0019
+        "count": 13,
+        "share": 0.0018
       },
       {
         "source_prefix": "repos/flagger_notify",
-        "count": 12,
-        "share": 0.0017
+        "count": 11,
+        "share": 0.0015
       }
     ],
     "weak_category_coverage": {
-      "attributes": 3007,
-      "di": 746,
-      "routing": 338,
-      "sdc": 203,
-      "twig": 618
+      "attributes": 3029,
+      "di": 770,
+      "routing": 340,
+      "sdc": 188,
+      "twig": 631
     },
     "strict_weak_category_coverage": {
-      "attributes": 3007,
-      "di": 746,
-      "routing": 338,
-      "sdc": 203,
-      "twig": 618
+      "attributes": 3029,
+      "di": 770,
+      "routing": 340,
+      "sdc": 188,
+      "twig": 631
     },
     "train_output_percentiles": {
-      "p50": 1663,
+      "p50": 1654,
       "p90": 6000,
       "p95": 6000,
       "p99": 6167
@@ -227,23 +232,23 @@
           "attributes": 600,
           "di": 600,
           "routing": 300,
-          "sdc": 200,
+          "sdc": 150,
           "twig": 450
         }
       },
       "metrics": {
         "malformed_instruction_class_slot": 0,
         "yaml_too_short_share": 0.0,
-        "drupal_core_train_share": 0.8728,
+        "drupal_core_train_share": 0.8757,
         "train_output_p95": 6000,
         "ambiguous_pair_ratio": 0.0,
         "normalized_output_duplicate_ratio": 0.0,
         "empty_input_share_by_type": {
-          "yaml_reference": 0.0,
           "code_reference": 0.0,
+          "yaml_reference": 0.0,
+          "sdc_reference": 0.0,
           "twig_reference": 0.0,
-          "doc_summary": 0.0,
-          "sdc_reference": 0.0
+          "doc_summary": 0.0
         },
         "final_artifact_counts": {
           "prompt_wrapper_echo": 0,
@@ -253,18 +258,18 @@
           "numeric_code_block_artifact": 0
         },
         "weak_category_coverage": {
-          "attributes": 3007,
-          "di": 746,
-          "routing": 338,
-          "sdc": 203,
-          "twig": 618
+          "attributes": 3029,
+          "di": 770,
+          "routing": 340,
+          "sdc": 188,
+          "twig": 631
         },
         "strict_weak_category_coverage": {
-          "attributes": 3007,
-          "di": 746,
-          "routing": 338,
-          "sdc": 203,
-          "twig": 618
+          "attributes": 3029,
+          "di": 770,
+          "routing": 340,
+          "sdc": 188,
+          "twig": 631
         }
       },
       "checks": {
@@ -304,7 +309,7 @@
       "attributes": 600,
       "di": 600,
       "routing": 300,
-      "sdc": 200,
+      "sdc": 150,
       "twig": 450
     },
     "weak_category_patterns": {

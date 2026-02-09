@@ -348,6 +348,13 @@ def _build_curated_sources(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             "description": "Drupal core repository",
         },
         {
+            "id": "drupal_recipes",
+            "type": "http",
+            "url": "https://www.drupal.org/docs/extending-drupal/recipes",
+            "ref": None,
+            "description": "Drupal Recipes documentation",
+        },
+        {
             "id": "drupal_docs",
             "type": "http",
             "url": "https://www.drupal.org/docs",

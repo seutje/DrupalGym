@@ -54,6 +54,8 @@ acquisition:
       - "annotation"
       - "%40block"
     allowed_prefixes:
+      drupal_recipes:
+        - "https://www.drupal.org/docs/extending-drupal/recipes"
       drupal_docs:
         - "https://www.drupal.org/docs"
         - "https://www.drupal.org/docs/develop"
@@ -83,6 +85,7 @@ sft_generation:
     - "repos/mcp_tools/"
   doc_source_allowlist_prefixes:
     - "docs/www_drupal_org/"
+    - "docs/www_drupal_org/docs/extending-drupal/recipes/"
     - "docs/www_drupal_org/docs/develop/theming/"
     - "docs/www_drupal_org/docs/develop/theming-drupal/"
     - "docs/www_drupal_org/docs/develop/theming-drupal/single-directory-components/"
@@ -157,6 +160,7 @@ quality:
     - "sdc_reference"
   doc_source_allowlist_prefixes:
     - "docs/www_drupal_org/"
+    - "docs/www_drupal_org/docs/extending-drupal/recipes/"
     - "docs/www_drupal_org/docs/develop/theming/"
     - "docs/www_drupal_org/docs/develop/theming-drupal/"
     - "docs/www_drupal_org/docs/develop/theming-drupal/single-directory-components/"
@@ -202,7 +206,7 @@ dataset_refinement:
     attributes: 600
     di: 600
     routing: 300
-    sdc: 200
+    sdc: 150
     twig: 450
   enforce_modern_drupal_patterns: true
   modern_drupal_required_categories: ["attributes", "di"]
