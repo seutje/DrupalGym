@@ -1,39 +1,39 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-09T17:05:57Z",
+  "timestamp": "2026-02-09T20:47:05Z",
   "inputs": [
     {
       "name": "v1_train",
       "version": "v1",
-      "hash": "4bcb3c543805d4ce38e4e415f263e8bdad2267b8f24e865de07ebd30c5f57875"
+      "hash": "badd9af707a477dcb698d9f54f2ff3f7230ca572ddae82b624c6b1197b6b7eeb"
     },
     {
       "name": "v1_valid",
       "version": "v1",
-      "hash": "21ae2e70ca413f4f0b02b2030013446a4a25122a0d638bb5c17b7650dd093109"
+      "hash": "59debeedf4fdd52e5daf85f7fcbabd67b62b394d63d2c1ac13470629e64dfb48"
     },
     {
       "name": "v1_test",
       "version": "v1",
-      "hash": "8f18a3526cd4e0fb2df01efffa56592e8753563e47c2384d48e766697dc56101"
+      "hash": "5559a3fbd551e45d3a575cb79249d32ccc803740896c94d25a0c61e8002e9302"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "885bc9dafa94f7130a5965655446b36eb2faf3a84fd94636561fb75bb990c540"
+      "hash": "f545c23b66e57604e9fbb248e700246e73a382fd2646b49d4d9c8946e119f3c7"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "d6c56ea8c95ca784d5c98d219a0b3e5df277cd0d1430550a6c205fb6a6055225"
+      "hash": "ca498e82700989f6dfd13406c550f081538055adc556656e63ac98ff8aba012d"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "faf833e79bf1cb298b13acbb83602db2d17ad5e5e33e24efce593b82938d0265"
+      "hash": "7f7a033ff550451ff46dd7db7e2c0e7d909e38b0a74372f678964860f8eca667"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "2e6b2e14c01d7af7ac509fc3230277f59f24e479e3e957b8bc513fa6bc3a42c7"
+      "hash": "63a2c8c8ee07874060756958ed4d32ed9cf695aa2a8e93873beec70b9710bbe1"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
@@ -41,48 +41,49 @@
     },
     "training_pool_clean": {
       "path": "dataset/v2/training_pool_clean.jsonl",
-      "hash": "fe35f28c4b5cf713c2cc394fd66be941dfff3993a32eb434902fd3653f635d34"
+      "hash": "3934e57c19f5c4aa0ccf600c75743f3854eb59c3afc3cbac5438a1a877fa5cb5"
     },
     "training_pool_experimental": {
       "path": "dataset/v2/training_pool_experimental.jsonl",
-      "hash": "cd77ac5f15e313fef2f77effc493fcfe5964f06f99dc7a514ecad173f4e5641f"
+      "hash": "d2b5153b3b6266fdd045db6cbac1498c118b5e0075772431d040c7449778fb72"
     },
     "quality_scorecard": {
       "path": "dataset/v2/quality_scorecard.json",
-      "hash": "032a9c02b816c384d8fbcf86e4c334582469a9378b4bfd9fcd9287ded884083f"
+      "hash": "9d97f26918a3b199b94dfe0ac2bfa636a3dd3618a4bb9097b52174bbfbee3649"
     }
   },
   "metrics": {
-    "input_total": 11231,
-    "filtered_total": 9854,
-    "output_char_filtered_total": 9854,
+    "input_total": 11884,
+    "filtered_total": 10467,
+    "output_char_filtered_total": 10467,
     "chunked_source_records": 0,
     "char_chunked_source_records": 0,
-    "chunked_total_records": 9854,
-    "rebalanced_total_records": 6827,
-    "dropped_test_records": 3027,
-    "augmented_records": 1726,
-    "augmentation_candidate_pool": 1726,
-    "normalized_output_dedup_dropped": 1295,
-    "normalized_output_duplicate_ratio_before_dedup": 0.1514,
+    "chunked_total_records": 10467,
+    "rebalanced_total_records": 7614,
+    "dropped_test_records": 2853,
+    "augmented_records": 1847,
+    "augmentation_candidate_pool": 1847,
+    "normalized_output_dedup_dropped": 1390,
+    "normalized_output_duplicate_ratio_before_dedup": 0.1469,
     "normalized_output_duplicate_ratio": 0.0,
     "ambiguous_pairs": 0,
     "ambiguous_samples": 0,
     "ambiguous_pair_ratio": 0.0,
     "empty_input_share_by_type": {
-      "code_reference": 0.0,
-      "yaml_reference": 0.0,
-      "sdc_reference": 0.0,
       "twig_reference": 0.0,
-      "doc_summary": 0.0
+      "yaml_reference": 0.0,
+      "code_reference": 0.0,
+      "sdc_reference": 0.0,
+      "doc_summary": 0.0,
+      "refactor": 0.0
     },
     "source_share_cap_dropped": 0,
-    "final_total": 7258,
-    "test_ratio_before_rebalance": 0.6189,
+    "final_total": 8071,
+    "test_ratio_before_rebalance": 0.5999,
     "test_ratio_after_rebalance": 0.45,
-    "split_train": 5806,
-    "split_valid": 725,
-    "split_test": 727,
+    "split_train": 6456,
+    "split_valid": 807,
+    "split_test": 808,
     "eval_candidate_pool_size": 0,
     "exclude_test_sources_from_training_pool": false,
     "exclude_sources_prefixes": [
@@ -90,15 +91,15 @@
       "repos/mcp_tools/"
     ],
     "yield_breakdown": {
-      "input_records": 11231,
-      "after_validation_filter": 9854,
-      "after_output_char_filter": 9854,
-      "after_chunking": 9854,
-      "after_test_pool_extraction": 6827,
-      "after_augmentation": 8553,
-      "after_normalized_output_dedup": 7258,
-      "after_source_share_cap": 7258,
-      "rejected_records": 5699
+      "input_records": 11884,
+      "after_validation_filter": 10467,
+      "after_output_char_filter": 10467,
+      "after_chunking": 10467,
+      "after_test_pool_extraction": 7614,
+      "after_augmentation": 9461,
+      "after_normalized_output_dedup": 8071,
+      "after_source_share_cap": 8071,
+      "rejected_records": 5660
     },
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
@@ -120,94 +121,94 @@
       ]
     },
     "rejection_reasons": {
-      "missing_drupal11_attribute_or_di_pattern": 1330,
-      "class_enum_mismatch": 1,
+      "missing_drupal11_attribute_or_di_pattern": 1369,
       "class_interface_mismatch": 27,
+      "retrieval_symbol_declaration_missing": 13,
       "truncation_artifact": 5,
-      "retrieval_symbol_declaration_missing": 12,
       "class_trait_mismatch": 2,
-      "test_rebalance_drop": 3027,
-      "augmentation_non_php_source": 2029,
-      "augmentation_from_test_source": 3072,
-      "normalized_output_dedupe_drop": 1295
+      "class_enum_mismatch": 1,
+      "test_rebalance_drop": 2853,
+      "augmentation_non_php_source": 2341,
+      "augmentation_from_test_source": 3426,
+      "normalized_output_dedupe_drop": 1390
     },
     "sample_type_distribution": {
-      "explain_and_implement": 431,
-      "retrieval": 5532,
-      "refactor": 432,
-      "write_from_spec": 431,
-      "bugfix": 432
+      "retrieval": 6224,
+      "write_from_spec": 462,
+      "refactor": 462,
+      "bugfix": 462,
+      "explain_and_implement": 461
     },
-    "clean_pool_size": 6827,
-    "experimental_pool_size": 1726,
+    "clean_pool_size": 7614,
+    "experimental_pool_size": 1847,
     "source_concentration_top10": [
       {
         "source_prefix": "repos/drupal_core",
-        "count": 6356,
-        "share": 0.8757
+        "count": 6725,
+        "share": 0.8332
       },
       {
         "source_prefix": "repos/display_builder",
-        "count": 346,
-        "share": 0.0477
+        "count": 359,
+        "share": 0.0445
       },
       {
         "source_prefix": "docs/www_drupal_org",
-        "count": 196,
-        "share": 0.027
+        "count": 240,
+        "share": 0.0297
+      },
+      {
+        "source_prefix": "repos/drupal_ui_patterns",
+        "count": 213,
+        "share": 0.0264
       },
       {
         "source_prefix": "docs/api_drupal_org",
-        "count": 113,
+        "count": 126,
         "share": 0.0156
       },
       {
         "source_prefix": "repos/eb",
-        "count": 82,
-        "share": 0.0113
+        "count": 84,
+        "share": 0.0104
       },
       {
         "source_prefix": "repos/webprofiler",
-        "count": 58,
-        "share": 0.008
+        "count": 61,
+        "share": 0.0076
+      },
+      {
+        "source_prefix": "repos/drupal_sdc_examples",
+        "count": 60,
+        "share": 0.0074
+      },
+      {
+        "source_prefix": "repos/drupal_gin_theme",
+        "count": 46,
+        "share": 0.0057
       },
       {
         "source_prefix": "repos/pinto_layout",
-        "count": 21,
-        "share": 0.0029
-      },
-      {
-        "source_prefix": "repos/commerce_referral",
-        "count": 21,
-        "share": 0.0029
-      },
-      {
-        "source_prefix": "repos/queue_manager",
-        "count": 13,
-        "share": 0.0018
-      },
-      {
-        "source_prefix": "repos/flagger_notify",
-        "count": 11,
-        "share": 0.0015
+        "count": 26,
+        "share": 0.0032
       }
     ],
     "weak_category_coverage": {
-      "attributes": 3029,
-      "di": 770,
-      "routing": 340,
-      "sdc": 188,
-      "twig": 631
+      "attributes": 3314,
+      "di": 823,
+      "routing": 369,
+      "sdc": 325,
+      "twig": 779
     },
     "strict_weak_category_coverage": {
-      "attributes": 3029,
-      "di": 770,
-      "routing": 340,
-      "sdc": 188,
-      "twig": 631
+      "attributes": 3314,
+      "di": 823,
+      "routing": 369,
+      "sdc": 325,
+      "twig": 779
     },
     "train_output_percentiles": {
-      "p50": 1654,
+      "p50": 1613,
       "p90": 6000,
       "p95": 6000,
       "p99": 6167
@@ -232,23 +233,24 @@
           "attributes": 600,
           "di": 600,
           "routing": 300,
-          "sdc": 150,
+          "sdc": 300,
           "twig": 450
         }
       },
       "metrics": {
         "malformed_instruction_class_slot": 0,
-        "yaml_too_short_share": 0.0,
-        "drupal_core_train_share": 0.8757,
+        "yaml_too_short_share": 0.0019,
+        "drupal_core_train_share": 0.8332,
         "train_output_p95": 6000,
         "ambiguous_pair_ratio": 0.0,
         "normalized_output_duplicate_ratio": 0.0,
         "empty_input_share_by_type": {
-          "code_reference": 0.0,
-          "yaml_reference": 0.0,
-          "sdc_reference": 0.0,
           "twig_reference": 0.0,
-          "doc_summary": 0.0
+          "yaml_reference": 0.0,
+          "code_reference": 0.0,
+          "sdc_reference": 0.0,
+          "doc_summary": 0.0,
+          "refactor": 0.0
         },
         "final_artifact_counts": {
           "prompt_wrapper_echo": 0,
@@ -258,18 +260,18 @@
           "numeric_code_block_artifact": 0
         },
         "weak_category_coverage": {
-          "attributes": 3029,
-          "di": 770,
-          "routing": 340,
-          "sdc": 188,
-          "twig": 631
+          "attributes": 3314,
+          "di": 823,
+          "routing": 369,
+          "sdc": 325,
+          "twig": 779
         },
         "strict_weak_category_coverage": {
-          "attributes": 3029,
-          "di": 770,
-          "routing": 340,
-          "sdc": 188,
-          "twig": 631
+          "attributes": 3314,
+          "di": 823,
+          "routing": 369,
+          "sdc": 325,
+          "twig": 779
         }
       },
       "checks": {
@@ -309,7 +311,7 @@
       "attributes": 600,
       "di": 600,
       "routing": 300,
-      "sdc": 150,
+      "sdc": 300,
       "twig": 450
     },
     "weak_category_patterns": {
