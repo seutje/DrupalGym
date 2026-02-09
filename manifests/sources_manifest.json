@@ -1,26 +1,29 @@
 {
   "stage": "sources",
-  "timestamp": "2026-02-09T18:40:04Z",
+  "timestamp": "2026-02-09T20:27:10Z",
   "inputs": [],
   "outputs": {
     "sources_manifest": {
       "path": "sources/manifest.json",
-      "hash": "b441bbf14463abe2ff95fb226abdab6435b62764702165d1abd085b890df7690"
+      "hash": "efc80364deb23c688532e9984e862becb923fd739b9c3ada0d59242ace191389"
     }
   },
   "metrics": {
     "projects_discovered": 1000,
     "projects_candidates": 14,
     "projects_filtered": 14,
-    "curated_sources": 14,
+    "curated_sources": 15,
     "rejection_reasons": {
+      "excluded_machine_name": 1,
+      "archived_or_security_only": 1,
       "missing_composer": 529,
       "php_constraint_too_low": 157,
-      "core_not_drupal11": 298,
-      "excluded_machine_name": 1,
-      "archived_or_security_only": 1
+      "core_not_drupal11": 298
     },
-    "max_projects_after_filter": 200
+    "max_projects_after_filter": 200,
+    "composer_candidates": 998,
+    "composer_fetch_workers": 4,
+    "max_requests_per_second": 2.0
   },
   "config": {}
 }

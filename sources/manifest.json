@@ -1,24 +1,27 @@
 {
   "stage": "sources",
-  "timestamp": "2026-02-09T18:40:04Z",
+  "timestamp": "2026-02-09T20:27:10Z",
   "seed": 42,
   "rate_limit": {
-    "delay_seconds": 1.0,
+    "delay_seconds": 0.1,
     "max_retries": 3
   },
   "metrics": {
     "projects_discovered": 1000,
     "projects_candidates": 14,
     "projects_filtered": 14,
-    "curated_sources": 14,
+    "curated_sources": 15,
     "rejection_reasons": {
+      "excluded_machine_name": 1,
+      "archived_or_security_only": 1,
       "missing_composer": 529,
       "php_constraint_too_low": 157,
-      "core_not_drupal11": 298,
-      "excluded_machine_name": 1,
-      "archived_or_security_only": 1
+      "core_not_drupal11": 298
     },
-    "max_projects_after_filter": 200
+    "max_projects_after_filter": 200,
+    "composer_candidates": 998,
+    "composer_fetch_workers": 4,
+    "max_requests_per_second": 2.0
   },
   "sources": {
     "curated": [
@@ -130,6 +133,15 @@
         "tags": null
       },
       {
+        "id": "drupal_sdc_examples",
+        "type": "git",
+        "url": "https://git.drupalcode.org/project/sdc_examples.git",
+        "ref": "1.x",
+        "description": "Single Directory Components examples module.",
+        "category": "contrib_sdc",
+        "tags": null
+      },
+      {
         "id": "drupal_recommended_project",
         "type": "git",
         "url": "https://github.com/drupal/recommended-project.git",
@@ -216,7 +228,7 @@
         "core_constraint": "^11.1",
         "php_constraint": ">=8.3",
         "last_changed": "2025-12-16T19:12:53Z",
-        "last_changed_days": 54,
+        "last_changed_days": 55,
         "has_tests": false,
         "usage": 2,
         "selection_reason": "drupal_core=^11.1; php=>=8.3; recent=True; has_tests=False"
@@ -378,7 +390,7 @@
         "core_constraint": "^11",
         "php_constraint": ">=8.3",
         "last_changed": "2026-01-04T20:15:32Z",
-        "last_changed_days": 35,
+        "last_changed_days": 36,
         "has_tests": false,
         "usage": 0,
         "selection_reason": "drupal_core=^11; php=>=8.3; recent=True; has_tests=False"

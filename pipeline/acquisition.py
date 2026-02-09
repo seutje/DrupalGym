@@ -28,6 +28,58 @@ def _clamp_workers(value: Any, *, default: int, hard_max: int = 16) -> int:
     return max(1, min(hard_max, parsed))
 
 
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
+def _doc_path_for_url(base_docs_dir: Path, url: str) -> Path:
+    parsed = urlparse(url)
+    domain = parsed.netloc.replace(".", "_")
+    path = parsed.path.strip("/")
+    if not path:
+        path = "index"
+    if not path.endswith((".html", ".md", ".json", ".xml")):
+        path += ".html"
+    return base_docs_dir / domain / path
+
+
+def _count_files_and_bytes(root: Path, *, suffixes: tuple[str, ...] | None = None) -> tuple[int, int]:
+    if not root.exists():
+        return (0, 0)
+    file_count = 0
+    byte_count = 0
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if suffixes and path.suffix.lower() not in suffixes:
+            continue
+        file_count += 1
+        try:
+            byte_count += path.stat().st_size
+        except OSError:
+            continue
+    return (file_count, byte_count)
+
+
+def _read_local_git_commit(target_dir: Path) -> str | None:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=target_dir).decode().strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
 class DocumentationFetcher:
     def __init__(
         self,
@@ -104,14 +156,7 @@ class DocumentationFetcher:
         }
 
     def get_doc_path(self, url: str) -> Path:
-        parsed = urlparse(url)
-        domain = parsed.netloc.replace(".", "_")
-        path = parsed.path.strip("/")
-        if not path:
-            path = "index"
-        if not path.endswith((".html", ".md", ".json", ".xml")):
-            path += ".html"
-        return self.base_docs_dir / domain / path
+        return _doc_path_for_url(self.base_docs_dir, url)
 
     def discover_links(self, url: str, allowed_prefixes: list[str], url_denylist_terms: list[str] | None = None) -> list[str]:
         try:
@@ -202,7 +247,34 @@ class DocumentationFetcher:
         }
 
 
-def clone_or_fetch(url: str, ref: str, target_dir: Path, logger: PipelineLogger) -> dict:
+def clone_or_fetch(
+    url: str,
+    ref: str,
+    target_dir: Path,
+    logger: PipelineLogger,
+    *,
+    reuse_existing_checkout: bool = False,
+) -> dict:
+    if reuse_existing_checkout and target_dir.exists():
+        if not (target_dir / ".git").exists():
+            logger.error(
+                "Existing directory is not a git checkout; cannot reuse.",
+                url=url,
+                target_dir=str(target_dir),
+            )
+            return {"success": False, "action": "reuse_failed_non_git", "retried": 0, "commit": None}
+        commit_hash = _read_local_git_commit(target_dir)
+        if not commit_hash:
+            logger.error("Failed reading commit hash from existing checkout.", url=url, target_dir=str(target_dir))
+            return {"success": False, "action": "reuse_failed_no_commit", "retried": 0, "commit": None}
+        logger.info("Reusing existing git checkout from raw cache.", url=url, target_dir=str(target_dir), ref=ref)
+        return {
+            "success": True,
+            "action": "reuse",
+            "retried": 0,
+            "commit": commit_hash,
+        }
+
     action = "fetch" if target_dir.exists() else "clone"
     retried = 0
 
@@ -224,7 +296,10 @@ def clone_or_fetch(url: str, ref: str, target_dir: Path, logger: PipelineLogger)
 
     try:
         subprocess.run(["git", "checkout", ref], cwd=target_dir, check=True, capture_output=True)
-        commit_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=target_dir).decode().strip()
+        commit_hash = _read_local_git_commit(target_dir)
+        if not commit_hash:
+            logger.error(f"Failed to read commit hash after checkout {ref}.")
+            return {"success": False, "action": action, "retried": retried, "commit": None}
         return {
             "success": True,
             "action": action,
@@ -770,6 +845,8 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
     manifest = Manifest("acquisition", raw_dir)
     manifest.add_input("sources_manifest", "1.0", calculate_hash(sources_manifest_path))
     acq_cfg = config.get("acquisition", {})
+    reuse_existing_repos = _coerce_bool(acq_cfg.get("reuse_existing_repos", True), default=True)
+    reuse_existing_docs = _coerce_bool(acq_cfg.get("reuse_existing_docs", True), default=True)
     docs_cfg = acq_cfg.get("docs", {})
     parallel_cfg = acq_cfg.get("parallel", {})
 
@@ -806,7 +883,13 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
         url = str(source.get("url"))
         ref = source.get("ref", default_ref or "master")
         target_dir = repos_dir / source_id
-        result = clone_or_fetch(url, ref, target_dir, logger)
+        result = clone_or_fetch(
+            url,
+            ref,
+            target_dir,
+            logger,
+            reuse_existing_checkout=reuse_existing_repos,
+        )
         payload = {
             "source_id": source_id,
             "type": "git",
@@ -836,12 +919,77 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
         source_id = str(source.get("id"))
         source_type = str(source.get("type", "http"))
         url = str(source.get("url", ""))
+        doc_output_dir: Path | None = None
+        source_start_path: Path | None = None
+        allowed_prefixes = None
+
+        if source_type == "http":
+            doc_output_dir = docs_dir / urlparse(url).netloc.replace(".", "_")
+            source_start_path = _doc_path_for_url(docs_dir, url)
+            allowed_prefixes = allowed_prefixes_cfg.get(source_id)
+            if not isinstance(allowed_prefixes, list) or not allowed_prefixes:
+                allowed_prefixes = _default_prefix_for_url(url)
+            if reuse_existing_docs and source_start_path.exists():
+                cached_pages, cached_bytes = _count_files_and_bytes(doc_output_dir)
+                if cached_pages > 0:
+                    logger.info(
+                        "Reusing existing documentation crawl from raw cache.",
+                        source_id=source_id,
+                        output_path=str(doc_output_dir.relative_to(root)),
+                        pages=cached_pages,
+                    )
+                    return {
+                        "source_id": source_id,
+                        "type": "http",
+                        "success": True,
+                        "status": "skipped_cached",
+                        "bytes": cached_bytes,
+                        "retried": 0,
+                        "pages": cached_pages,
+                        "failed_pages": 0,
+                        "allowed_prefixes": allowed_prefixes,
+                        "url_denylist_terms": url_denylist_terms,
+                        "action": "reuse",
+                        "manifest_output_path": str(doc_output_dir.relative_to(root)),
+                        "manifest_output_hash": "collection",
+                    }
+        elif source_type == "drupal_change_records":
+            doc_output_dir = docs_dir / "www_drupal_org" / "change_records"
+            if reuse_existing_docs:
+                cached_pages, cached_bytes = _count_files_and_bytes(doc_output_dir, suffixes=(".md",))
+                if cached_pages > 0:
+                    logger.info(
+                        "Reusing existing change record crawl from raw cache.",
+                        source_id=source_id,
+                        output_path=str(doc_output_dir.relative_to(root)),
+                        pages=cached_pages,
+                    )
+                    return {
+                        "source_id": source_id,
+                        "type": "drupal_change_records",
+                        "success": True,
+                        "status": "skipped_cached",
+                        "bytes": cached_bytes,
+                        "retried": 0,
+                        "pages": cached_pages,
+                        "failed_pages": 0,
+                        "discovered_links": cached_pages,
+                        "written_records": cached_pages,
+                        "pruned_records": 0,
+                        "lookback_months": int(source.get("lookback_months", 0)),
+                        "target_versions": list(source.get("target_versions", [])),
+                        "required_status": str(source.get("status", "")),
+                        "reasons": {"skipped_cached": cached_pages},
+                        "published_status_inferred": 0,
+                        "record_workers": int(source.get("parallel_workers", change_record_workers)),
+                        "action": "reuse",
+                        "manifest_output_path": str(doc_output_dir.relative_to(root)),
+                        "manifest_output_hash": "collection",
+                    }
+
         fetcher = _build_fetcher()
         try:
             if source_type == "http":
-                allowed_prefixes = allowed_prefixes_cfg.get(source_id)
-                if not isinstance(allowed_prefixes, list) or not allowed_prefixes:
-                    allowed_prefixes = _default_prefix_for_url(url)
 
                 logger.info(
                     f"Starting recursive fetch for {source_id}",
@@ -872,6 +1020,7 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
                     "failed_pages": int(result.get("failed_pages", 0)),
                     "allowed_prefixes": allowed_prefixes,
                     "url_denylist_terms": url_denylist_terms,
+                    "action": "fetch",
                     "manifest_output_path": str((docs_dir / urlparse(url).netloc.replace(".", "_")).relative_to(root)),
                     "manifest_output_hash": "collection",
                 }
@@ -915,6 +1064,7 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
                     "reasons": result.get("reasons", {}),
                     "published_status_inferred": int(result.get("published_status_inferred", 0)),
                     "record_workers": int(result.get("record_workers", change_record_workers)),
+                    "action": "fetch",
                     "manifest_output_path": str((docs_dir / "www_drupal_org" / "change_records").relative_to(root)),
                     "manifest_output_hash": "collection",
                 }
@@ -1151,6 +1301,8 @@ def run_acquisition_stage(config: dict, logger: PipelineLogger, root: Path):
             "git_workers": git_workers,
             "docs_workers": docs_workers,
             "change_record_workers": change_record_workers,
+            "reuse_existing_repos": reuse_existing_repos,
+            "reuse_existing_docs": reuse_existing_docs,
             "total_repos": len(drupal_project_sources)
             + sum(1 for source in curated_sources if source.get("type") == "git"),
         }

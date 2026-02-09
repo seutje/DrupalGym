@@ -108,6 +108,7 @@ Pipeline behavior is controlled by `pipeline.yaml`. Key knobs include:
 For stages 1-5 throughput tuning, use:
 - `sources.rate_limit` + `sources.parallel.composer_workers`
 - `acquisition.parallel.{git_workers,docs_workers,change_record_workers}` and `acquisition.docs` request timing knobs
+- `acquisition.reuse_existing_repos` and `acquisition.reuse_existing_docs` to skip network fetches when cached `raw/` outputs already exist
 - `normalization.parallel.read_workers`
 - `sft_generation.parallel.read_workers`
 - `quality.runtime_check_workers`
@@ -177,7 +178,7 @@ Command:
 python3 -m pipeline run 2
 ```
 Prereqs: `sources/manifest.json`, network access, `git` on PATH.
-What it does: clones or fetches repos into `raw/repos/` and crawls selected docs into `raw/docs/`. Git fetch/clone and doc source tasks use bounded worker pools, and doc requests use configurable delay/retry controls.
+What it does: clones or fetches repos into `raw/repos/` and crawls selected docs into `raw/docs/`. By default, it reuses existing cached checkouts/docs in `raw/` and skips network work (`acquisition.reuse_existing_repos: true`, `acquisition.reuse_existing_docs: true`). Git/doc tasks use bounded worker pools, and doc requests use configurable delay/retry controls.
 Outputs: `raw/manifest.json`, `raw/repos/`, `raw/docs/`.
 
 **Stage 3: Normalization and Deduplication**

@@ -115,6 +115,8 @@ sources:
       - "mcp_tools"
 
 acquisition:
+  reuse_existing_repos: true
+  reuse_existing_docs: true
   parallel:
     git_workers: 4
     docs_workers: 2
