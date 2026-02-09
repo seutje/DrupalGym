@@ -338,14 +338,16 @@ def _fetch_composer_metadata(
 
 
 def _build_curated_sources(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    drupal_core = config.get("sources", {}).get("drupal_core", {})
-    return [
+    source_cfg = config.get("sources", {})
+    drupal_core = source_cfg.get("drupal_core", {})
+    curated: List[Dict[str, Any]] = [
         {
             "id": "drupal_core",
             "type": drupal_core.get("type", "git"),
             "url": drupal_core.get("url"),
             "ref": drupal_core.get("branch"),
             "description": "Drupal core repository",
+            "tags": drupal_core.get("tags"),
         },
         {
             "id": "drupal_recipes",
@@ -383,6 +385,38 @@ def _build_curated_sources(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             "description": "Drupal security advisories",
         },
     ]
+
+    extra_sources = source_cfg.get("curated_repos", [])
+    if isinstance(extra_sources, list):
+        for entry in extra_sources:
+            if not isinstance(entry, dict):
+                continue
+            enabled = entry.get("enabled", True)
+            if enabled is False:
+                continue
+            source_id = str(entry.get("id", "")).strip()
+            url = str(entry.get("url", "")).strip()
+            if not source_id or not url:
+                continue
+            curated.append(
+                {
+                    "id": source_id,
+                    "type": entry.get("type", "git"),
+                    "url": url,
+                    "ref": entry.get("ref"),
+                    "description": entry.get("description", f"Curated source {source_id}"),
+                    "category": entry.get("category"),
+                    "tags": entry.get("tags"),
+                }
+            )
+
+    deduped: dict[str, Dict[str, Any]] = {}
+    for source in curated:
+        source_id = str(source.get("id", "")).strip()
+        if not source_id:
+            continue
+        deduped[source_id] = {**deduped.get(source_id, {}), **source}
+    return list(deduped.values())
 
 
 def _score_project(
