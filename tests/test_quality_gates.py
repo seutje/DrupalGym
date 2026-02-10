@@ -75,6 +75,21 @@ class QualityGateHelpersTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, "prompt_wrapper_echo")
 
+    def test_malformed_prompt_wrapper_rejected(self):
+        sample = {
+            "instruction": "Explain the following topic based on Drupal 11 documentation: Services",
+            "input": "",
+            "output": (
+                "### Instruction: build a service.\n"
+                "### Response:\n"
+                "Use constructor injection and service definitions in Drupal 11.\n"
+            ),
+            "metadata": {"source": "doc.md"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "prompt_wrapper_echo")
+
     def test_numeric_line_streak_rejected(self):
         numbered = "\n".join(str(i) for i in range(1, 45))
         sample = {
@@ -112,6 +127,21 @@ class QualityGateHelpersTest(unittest.TestCase):
                 "This output looks valid but leaks a generation artifact token.\n"
                 "<|fim_middle|>\n"
                 "That token should be rejected by the quality gate.\n"
+            ),
+            "metadata": {"source": "doc.md"},
+        }
+        ok, reason = self.gate.check_sample(sample)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "special_token_artifact")
+
+    def test_plain_fim_marker_artifact_rejected(self):
+        sample = {
+            "instruction": "Explain the following topic based on Drupal 11 documentation: Components",
+            "input": "",
+            "output": (
+                "This output leaks a plain FIM marker format.\n"
+                "<fim_middle>\n"
+                "It should be hard rejected.\n"
             ),
             "metadata": {"source": "doc.md"},
         }

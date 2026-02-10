@@ -24,18 +24,18 @@
   },
   "metrics": {
     "malformed_instruction_class_slot": 0,
-    "yaml_too_short_share": 0.0019,
-    "drupal_core_train_share": 0.8332,
+    "yaml_too_short_share": 0.0018,
+    "drupal_core_train_share": 0.8315,
     "train_output_p95": 6000,
     "ambiguous_pair_ratio": 0.0,
     "normalized_output_duplicate_ratio": 0.0,
     "empty_input_share_by_type": {
-      "twig_reference": 0.0,
-      "yaml_reference": 0.0,
       "code_reference": 0.0,
-      "sdc_reference": 0.0,
+      "yaml_reference": 0.0,
+      "refactor": 0.0,
+      "twig_reference": 0.0,
       "doc_summary": 0.0,
-      "refactor": 0.0
+      "sdc_reference": 0.0
     },
     "final_artifact_counts": {
       "prompt_wrapper_echo": 0,
@@ -45,18 +45,18 @@
       "numeric_code_block_artifact": 0
     },
     "weak_category_coverage": {
-      "attributes": 3314,
-      "di": 823,
-      "routing": 369,
-      "sdc": 325,
-      "twig": 779
+      "attributes": 3307,
+      "di": 810,
+      "routing": 358,
+      "sdc": 284,
+      "twig": 745
     },
     "strict_weak_category_coverage": {
-      "attributes": 3314,
-      "di": 823,
-      "routing": 369,
-      "sdc": 325,
-      "twig": 779
+      "attributes": 3307,
+      "di": 810,
+      "routing": 358,
+      "sdc": 284,
+      "twig": 745
     }
   },
   "checks": {
@@ -68,7 +68,7 @@
     "normalized_output_duplicate_ratio": true,
     "empty_input_share_by_type": true,
     "final_artifact_counts": true,
-    "weak_category_coverage": true
+    "weak_category_coverage": false
   },
-  "overall_passed": true
+  "overall_passed": false
 }

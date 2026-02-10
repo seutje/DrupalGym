@@ -1,22 +1,22 @@
 {
   "v1": {
-    "timestamp": "2026-02-09T20:45:56Z",
+    "timestamp": "2026-02-10T05:14:10Z",
     "metrics": {
-      "train": 9507,
-      "valid": 1188,
-      "test": 1189,
-      "total": 11884
+      "train": 9479,
+      "valid": 1184,
+      "test": 1186,
+      "total": 11849
     },
     "path": "dataset/v1"
   },
   "v2": {
-    "timestamp": "2026-02-09T20:47:05Z",
+    "timestamp": "2026-02-10T05:14:13Z",
     "stage": "dataset_refinement",
     "metrics": {
-      "train": 6456,
-      "valid": 807,
-      "test": 808,
-      "total": 8071
+      "train": 6431,
+      "valid": 804,
+      "test": 807,
+      "total": 8042
     },
     "path": "dataset/v2"
   }

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from pipeline.evaluation import (
     _apply_external_required_checks,
+    _artifact_guard,
     _build_generation_kwargs,
     _compute_format_sanity,
     _extract_code_blocks,
@@ -188,11 +189,18 @@ class EvaluationHelpersTest(unittest.TestCase):
         checks, required = _required_checks_for_prompt("block_attribute", output)
         self.assertTrue(all(checks[name] for name in required))
 
+    def test_required_checks_can_enforce_fenced_php_contract(self):
+        prompt = {"require_fenced_php": True}
+        checks, required = _required_checks_for_prompt("custom_php_prompt", "<?php\nfinal class InlineOnly {}\n", prompt=prompt)
+        self.assertIn("has_fenced_php_block", required)
+        self.assertFalse(checks["has_fenced_php_block"])
+
     def test_apply_external_required_checks_requires_php_snippet_for_service_di(self):
         checks = {"non_empty_output": True}
         required = ["non_empty_output"]
         updated_checks, updated_required = _apply_external_required_checks(
             prompt_id="service_di",
+            prompt={"requires_php": True},
             checks=checks,
             required=required,
             external_checks={"php_checked_count": 0},
@@ -205,6 +213,7 @@ class EvaluationHelpersTest(unittest.TestCase):
         required = ["non_empty_output"]
         updated_checks, updated_required = _apply_external_required_checks(
             prompt_id="routing_yaml",
+            prompt={"requires_php": True},
             checks=checks,
             required=required,
             external_checks={"php_checked_count": 1},
@@ -243,6 +252,65 @@ class EvaluationHelpersTest(unittest.TestCase):
         self.assertFalse(score["passes_php_lint"])
         self.assertFalse(score["passed"])
         self.assertLess(score["score"], 1.0)
+
+    def test_score_result_phpcs_failure_is_style_only(self):
+        required_checks = {"non_empty_output": True}
+        required = ["non_empty_output"]
+        external = {
+            "php_lint": {
+                "enabled": False,
+                "available": False,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+            "phpcs": {
+                "enabled": True,
+                "available": True,
+                "drupal_standard_available": True,
+                "checked": 1,
+                "passed": 0,
+                "failed": 1,
+                "errors": [{"snippet": 1, "message": "line 1: style issue"}],
+            },
+            "phpstan": {
+                "enabled": False,
+                "available": False,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+        }
+        score = _score_result(required_checks, required, external)
+        self.assertTrue(score["passes_semantic"])
+        self.assertFalse(score["passes_style"])
+        self.assertTrue(score["passed"])
+        self.assertLess(score["style_score"], 1.0)
+
+    def test_score_result_artifact_guard_hard_rejects(self):
+        required_checks = {"non_empty_output": True}
+        required = ["non_empty_output"]
+        external = {
+            "php_lint": {"enabled": False, "available": False, "checked": 0, "passed": 0, "failed": 0, "errors": []},
+            "phpcs": {
+                "enabled": False,
+                "available": False,
+                "drupal_standard_available": False,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+            "phpstan": {"enabled": False, "available": False, "checked": 0, "passed": 0, "failed": 0, "errors": []},
+        }
+        guard = _artifact_guard("### Instruction: bad wrapper leakage\n")
+        score = _score_result(required_checks, required, external, artifact_guard=guard)
+        self.assertFalse(score["passes_artifact_guard"])
+        self.assertFalse(score["passes_semantic"])
+        self.assertFalse(score["passed"])
+        self.assertEqual(score["semantic_score"], 0.0)
 
     def test_score_result_fails_lint_gates_when_required_php_snippet_missing(self):
         required_checks = {
@@ -415,6 +483,8 @@ class EvaluationHelpersTest(unittest.TestCase):
         self.assertEqual(model_summary["fine_tuned_wins"], 1)
         self.assertEqual(model_summary["ties"], 1)
         self.assertGreater(model_summary["delta_avg_score"], 0)
+        self.assertIn("delta_avg_semantic_score", model_summary)
+        self.assertIn("delta_avg_style_score", model_summary)
         self.assertLess(model_summary["fine_tuned_format_sanity_avg"], model_summary["baseline_format_sanity_avg"])
         self.assertGreater(model_summary["fine_tuned_format_sanity_fail_rate"], 0.0)
 

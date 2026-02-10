@@ -442,6 +442,274 @@ evaluation:
   php_snippet_policy: "php_only" # "php_only" (default) or "all_fences" for legacy behavior
   repetition_penalty: 1.1
   no_repeat_ngram_size: 4
+  prompt_suite:
+    # 40 prompts total: 20 PHP-required and 20 non-PHP-required.
+    - id: "block_attribute"
+      category: "attributes"
+      instruction: "Create a Drupal 11 Block plugin using PHP 8.3 attributes. Return one fenced php block only. Block id must be gym_stats and label Gym Statistics."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["#[Block", "gym_stats", "gym statistics"]
+    - id: "field_type_attribute"
+      category: "attributes"
+      instruction: "Create a Drupal 11 FieldType plugin class using attributes for a string-backed field named gym_plan_code. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["#[FieldType", "gym_plan_code", "class"]
+    - id: "event_subscriber_attribute"
+      category: "attributes"
+      instruction: "Write a Drupal 11 event subscriber class that listens to KernelEvents::REQUEST using PHP 8.3 attributes. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["KernelEvents::REQUEST", "eventsubscriber", "class"]
+    - id: "access_checker_attribute"
+      category: "attributes"
+      instruction: "Implement a Drupal 11 custom access checker service class using an attribute-based plugin declaration. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["access", "class", "namespace drupal"]
+    - id: "queue_worker_attribute"
+      category: "attributes"
+      instruction: "Create a Drupal 11 QueueWorker plugin with PHP attribute metadata and processItem(). Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["#[QueueWorker", "processItem", "class"]
+    - id: "plugin_deriver_attribute"
+      category: "attributes"
+      instruction: "Create a Drupal 11 plugin deriver class and a matching attribute-based plugin that references the deriver. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["deriver", "class", "#["]
+    - id: "command_attribute"
+      category: "attributes"
+      instruction: "Write a Drupal 11 CLI command class using PHP 8.3 attributes and dependency injection. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["#[", "__construct(", "execute"]
+    - id: "action_plugin_attribute"
+      category: "attributes"
+      instruction: "Implement a Drupal 11 Action plugin using attributes with id gym_publish and label Gym Publish. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["gym_publish", "action", "#["]
+
+    - id: "service_di"
+      category: "di"
+      instruction: "Define gym.services.yml and a Drupal 11 service class using constructor injection for logger.factory. Return exactly two fenced blocks: yaml first, php second."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["services:", "logger.factory", "__construct("]
+      required_regex: ['```yaml[\s\S]*```[\s\S]*```php']
+    - id: "service_factory_di"
+      category: "di"
+      instruction: "Create a Drupal 11 service class that injects entity_type.manager and builds a node storage helper. Return exactly two fenced blocks: yaml then php."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["entity_type.manager", "services:", "__construct("]
+    - id: "plugin_create_di"
+      category: "di"
+      instruction: "Create a Drupal 11 plugin class implementing ContainerFactoryPluginInterface with create() and constructor injection. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["ContainerFactoryPluginInterface", "create(", "__construct("]
+    - id: "subscriber_di_logger"
+      category: "di"
+      instruction: "Write a Drupal 11 EventSubscriber class that injects logger.channel.default and logs on response. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["EventSubscriberInterface", "__construct(", "logger"]
+    - id: "controller_di_time"
+      category: "di"
+      instruction: "Implement a Drupal 11 controller class that injects datetime.time and returns a render array. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["datetime.time", "__construct(", "render"]
+    - id: "cache_service_di"
+      category: "di"
+      instruction: "Write a Drupal 11 service that injects cache.default and serializes gym stats lookup results. Return one fenced php block."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["cache.default", "__construct(", "class"]
+    - id: "services_yaml_alias"
+      category: "di"
+      instruction: "Provide only Drupal 11 YAML for gym.services.yml defining gym.stats and a public alias gym.stats.alias. Return one fenced yaml block and no php."
+      input: ""
+      requires_php: false
+      required_substrings: ["services:", "gym.stats", "alias"]
+    - id: "container_parameters_yaml"
+      category: "di"
+      instruction: "Provide only Drupal 11 YAML showing service parameters and one service using %gym.default_limit%. Return one fenced yaml block and no php."
+      input: ""
+      requires_php: false
+      required_substrings: ["parameters:", "gym.default_limit", "services:"]
+
+    - id: "routing_yaml"
+      category: "routing"
+      instruction: "Create gym.routing.yml and a matching Drupal 11 controller for /gym/stats. Return exactly two fenced blocks: yaml first, php second."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["/gym/stats", "_controller", "class"]
+      required_regex: ['```yaml[\s\S]*```[\s\S]*```php']
+    - id: "routing_access_service"
+      category: "routing"
+      instruction: "Create a route using _custom_access and implement the access checker method in a controller/service class. Return exactly two fenced blocks: yaml then php."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["_custom_access", "AccessResult", "class"]
+    - id: "routing_admin_form"
+      category: "routing"
+      instruction: "Create a Drupal 11 admin form route under /admin/config/gym/settings and a form class skeleton. Return exactly two fenced blocks: yaml then php."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["/admin/config/gym/settings", "_form", "ConfigFormBase"]
+    - id: "routing_entity_upcast"
+      category: "routing"
+      instruction: "Define a route with {node} parameter and create a controller method receiving NodeInterface. Return exactly two fenced blocks: yaml then php."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["{node}", "NodeInterface", "_controller"]
+    - id: "routing_permission_controller"
+      category: "routing"
+      instruction: "Define a route for /gym/reports with a custom permission and matching controller method. Return exactly two fenced blocks: yaml then php."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["/gym/reports", "_permission", "class"]
+    - id: "routing_json_response"
+      category: "routing"
+      instruction: "Define a Drupal 11 route and controller returning JsonResponse for /gym/api/stats. Return exactly two fenced blocks: yaml then php."
+      input: ""
+      requires_php: true
+      require_fenced_php: true
+      required_substrings: ["/gym/api/stats", "JsonResponse", "_controller"]
+    - id: "routing_only_yaml_public"
+      category: "routing"
+      instruction: "Provide only gym.routing.yml entries for two public read-only routes under /gym/classes and /gym/trainers. Return one fenced yaml block and no php."
+      input: ""
+      requires_php: false
+      required_substrings: ["gym.classes", "/gym/classes", "/gym/trainers"]
+    - id: "routing_only_yaml_admin"
+      category: "routing"
+      instruction: "Provide only gym.routing.yml YAML for one admin route requiring administer site configuration permission. Return one fenced yaml block and no php."
+      input: ""
+      requires_php: false
+      required_substrings: ["administer site configuration", "defaults:", "requirements:"]
+
+    - id: "sdc_component"
+      category: "sdc"
+      instruction: "Show a Drupal 11 Single Directory Component example with directory tree, component.yml, and twig template. Use fenced text/yaml/twig blocks, no php."
+      input: ""
+      requires_php: false
+      required_substrings: ["component.yml", ".twig", "props:"]
+    - id: "sdc_card_component"
+      category: "sdc"
+      instruction: "Provide a Drupal 11 SDC card component with component.yml props for title and body plus card.twig. Use fenced yaml and twig blocks only."
+      input: ""
+      requires_php: false
+      required_substrings: ["card", "component.yml", "{{"]
+    - id: "sdc_button_component_slots"
+      category: "sdc"
+      instruction: "Create an SDC button component example using slots in component.yml and render logic in twig. Use fenced yaml and twig blocks."
+      input: ""
+      requires_php: false
+      required_substrings: ["slots", "component.yml", ".twig"]
+    - id: "sdc_teaser_component"
+      category: "sdc"
+      instruction: "Create a Drupal 11 teaser SDC with props image_url, title, summary and a twig template. Use fenced yaml and twig only."
+      input: ""
+      requires_php: false
+      required_substrings: ["image_url", "summary", "component.yml"]
+    - id: "sdc_component_library_doc"
+      category: "sdc"
+      instruction: "Explain the minimal Drupal 11 SDC directory layout and include component.yml and twig snippets. No php."
+      input: ""
+      requires_php: false
+      required_substrings: ["components/", "component.yml", ".twig"]
+    - id: "sdc_component_with_props_schema"
+      category: "sdc"
+      instruction: "Provide an SDC component.yml that declares props schema with types string, boolean, and array, plus a twig snippet consuming them."
+      input: ""
+      requires_php: false
+      required_substrings: ["type: string", "type: boolean", "type: array"]
+    - id: "sdc_component_css_contract"
+      category: "sdc"
+      instruction: "Provide an SDC example including component.yml, twig markup, and suggested css class naming conventions. No php."
+      input: ""
+      requires_php: false
+      required_substrings: ["component.yml", "class=", "css"]
+    - id: "sdc_component_storybook_meta"
+      category: "sdc"
+      instruction: "Provide an SDC example with component.yml, twig, and a short metadata note for preview usage. No php."
+      input: ""
+      requires_php: false
+      required_substrings: ["component.yml", "preview", ".twig"]
+
+    - id: "twig_render_array_loop"
+      category: "twig"
+      instruction: "Write a Twig snippet for Drupal 11 that loops over items and prints title and url safely. Return one fenced twig block only."
+      input: ""
+      requires_php: false
+      required_substrings: ["for", "endfor", "{{"]
+    - id: "twig_attributes_class"
+      category: "twig"
+      instruction: "Write a Drupal Twig example using create_attribute/addClass patterns for wrapper classes. Return one fenced twig block."
+      input: ""
+      requires_php: false
+      required_substrings: ["attributes", "addClass", "{{"]
+    - id: "twig_template_extends"
+      category: "twig"
+      instruction: "Provide a Twig template that extends a base template and overrides a content block for Drupal 11 theming."
+      input: ""
+      requires_php: false
+      required_substrings: ["extends", "block", "endblock"]
+    - id: "twig_include_component"
+      category: "twig"
+      instruction: "Provide Twig code that includes an SDC twig file and passes named variables."
+      input: ""
+      requires_php: false
+      required_substrings: ["include", "with", ".twig"]
+    - id: "twig_macro_example"
+      category: "twig"
+      instruction: "Provide a Twig macro example for rendering gym metric rows, then call the macro in the same template."
+      input: ""
+      requires_php: false
+      required_substrings: ["macro", "import", "{{"]
+    - id: "twig_conditional_rendering"
+      category: "twig"
+      instruction: "Provide a Twig snippet that conditionally renders a message when classes list is empty."
+      input: ""
+      requires_php: false
+      required_substrings: ["if", "else", "endif"]
+    - id: "twig_trans_filter"
+      category: "twig"
+      instruction: "Provide a Drupal Twig snippet demonstrating translation with trans filter and placeholders."
+      input: ""
+      requires_php: false
+      required_substrings: ["|trans", "%", "{{"]
+    - id: "twig_attach_library"
+      category: "twig"
+      instruction: "Provide a Twig snippet that attaches a Drupal library gym/global and renders a component wrapper."
+      input: ""
+      requires_php: false
+      required_substrings: ["attach_library", "gym/global", "div"]
 
 export:
   formats: ["safetensors", "gguf"]

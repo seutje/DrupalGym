@@ -242,7 +242,7 @@ Command:
 python3 -m pipeline run 8
 ```
 Prereqs: trained adapter at `models/<model>/{test_run|final}/adapter/` for the configured evaluation mode.
-What it does: runs a targeted Drupal 11 prompt suite (attributes, DI, routing, SDC), generates fine-tuned and baseline outputs, runs automated checks (required prompt checks plus optional PHP lint/PHPCS/PHPStan), computes output-format sanity checks (wrapper echoes, numeric-line streaks, repetition), and writes comparison metrics. PHP tooling runs against snippets selected by `evaluation.php_snippet_policy` (`php_only` by default, `all_fences` for legacy behavior). Stage 8 now recreates `eval/sample_outputs/` on each run so `eval/sample_outputs/index.json` only indexes current-run outputs.
+What it does: runs a configurable Drupal 11 prompt suite (default config now uses 40 prompts across attributes/DI/routing/SDC/twig with balanced PHP-required vs non-PHP-required tasks), generates fine-tuned and baseline outputs, enforces prompt contracts (including required fenced PHP blocks where configured), runs automated checks, and writes comparison metrics. Scoring is split into semantic and style channels: semantic pass/fail uses required checks + PHP lint/PHPStan + artifact guardrails; style uses PHPCS separately so style failures do not mask functional gains. Stage 8 hard-rejects malformed wrapper leakage and FIM/special-token artifacts in scoring, records evaluator logic/version hashes for run comparability, and recreates `eval/sample_outputs/` on each run so `eval/sample_outputs/index.json` only indexes current-run outputs.
 Outputs: `eval/metrics.json`, `eval/sample_outputs/`, `eval/sample_outputs/index.json`, `eval/manifest.json`.
 
 **Stage 9: Full-Scale Training**

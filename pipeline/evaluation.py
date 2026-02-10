@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import hashlib
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -11,36 +12,64 @@ from typing import Any
 from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
 
+EVALUATOR_LOGIC_VERSION = "2026-02-10.1"
 DEFAULT_PROMPT_SUITE = [
     {
         "id": "block_attribute",
         "category": "attributes",
-        "instruction": "Create a Drupal 11 Block plugin using PHP 8.3 attributes. The block ID should be 'gym_stats' and the label 'Gym Statistics'.",
+        "instruction": (
+            "Create a Drupal 11 Block plugin using PHP 8.3 attributes. "
+            "Return one explicit fenced php code block only. "
+            "The block ID must be 'gym_stats' and label 'Gym Statistics'."
+        ),
         "input": "",
+        "requires_php": True,
+        "require_fenced_php": True,
+        "required_substrings": ["#[Block", "gym_stats", "Gym Statistics"],
     },
     {
         "id": "service_di",
         "category": "di",
-        "instruction": "Define a Drupal 11 service in gym.services.yml and its class implementation using constructor injection for the logger.factory service.",
+        "instruction": (
+            "Define a Drupal 11 service in gym.services.yml and its class implementation using constructor "
+            "injection for logger.factory. Return exactly two fenced blocks in this order: yaml, then php."
+        ),
         "input": "",
+        "requires_php": True,
+        "require_fenced_php": True,
+        "required_substrings": ["services:", "logger.factory", "__construct("],
     },
     {
         "id": "routing_yaml",
         "category": "routing",
-        "instruction": "Create a Drupal 11 gym.routing.yml route and a matching controller method for the path '/gym/stats'.",
+        "instruction": (
+            "Create a Drupal 11 gym.routing.yml route and a matching controller method for '/gym/stats'. "
+            "Return exactly two fenced blocks in this order: yaml, then php."
+        ),
         "input": "",
+        "requires_php": True,
+        "require_fenced_php": True,
+        "required_substrings": ["/gym/stats", "_controller"],
     },
     {
         "id": "sdc_component",
         "category": "sdc",
         "instruction": "Show a Drupal 11 Single Directory Component example with directory structure and component.yml.",
         "input": "",
+        "requires_php": False,
+        "required_substrings": ["component.yml", ".twig"],
     },
 ]
-PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
+PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output|response|assistant|user)\s*:")
+MALFORMED_WRAPPER_RE = re.compile(
+    r"(?im)(\[\s*/?inst\s*\]|^\s*###\s*(instruction|input|output|response)\s*:|<\|im_(start|end)\|>|<\|assistant\|>|<\|user\|>)"
+)
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 PHPSTAN_SYNTAX_ERROR_RE = re.compile(r"(syntax error|parse error)", re.IGNORECASE)
 SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
+FIM_MARKER_RE = re.compile(
+    r"(?i)(<\|fim_(prefix|middle|suffix|pad)\|>|<fim_(prefix|middle|suffix|pad)>|<\|file_sep\|>)"
+)
 FENCED_CODE_BLOCK_RE = re.compile(r"```([A-Za-z0-9_+-]*)\n(.*?)```", re.DOTALL)
 PHPCS_TEMPFILE_CLASSNAME_RE = re.compile(r"class name doesn't match filename", re.IGNORECASE)
 PHPCS_TEMPFILE_NOISE_SOURCES = {
@@ -56,6 +85,42 @@ def _iso_timestamp() -> str:
 def _sanitize_slug(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_")
     return slug or "model"
+
+
+def _hash_json_payload(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _build_evaluator_metadata(eval_cfg: dict[str, Any]) -> dict[str, Any]:
+    prompt_suite = eval_cfg.get("prompt_suite", [])
+    scoring_profile = {
+        "semantic_channels": ["required_checks", "php_lint", "phpstan", "artifact_guard"],
+        "style_channels": ["phpcs"],
+        "semantic_weight": 0.8,
+        "style_weight": 0.2,
+        "pass_signal": "semantic",
+    }
+    return {
+        "logic_version": EVALUATOR_LOGIC_VERSION,
+        "logic_file": "pipeline/evaluation.py",
+        "logic_sha256": calculate_hash(Path(__file__)),
+        "prompt_suite_size": len(prompt_suite) if isinstance(prompt_suite, list) else 0,
+        "prompt_suite_sha256": _hash_json_payload(prompt_suite),
+        "scoring_profile": scoring_profile,
+    }
+
+
+def _has_prompt_wrapper_leakage(output: str) -> bool:
+    return bool(PROMPT_WRAPPER_RE.search(output) or MALFORMED_WRAPPER_RE.search(output))
+
+
+def _has_special_token_artifact(output: str) -> bool:
+    if SPECIAL_TOKEN_ARTIFACT_RE.search(output):
+        return True
+    if FIM_MARKER_RE.search(output):
+        return True
+    return "_closed_prs" in output.lower()
 
 
 def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -77,7 +142,25 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
     }
     merged = defaults | config.get("evaluation", {})
     prompt_suite = merged.get("prompt_suite") or DEFAULT_PROMPT_SUITE
-    merged["prompt_suite"] = prompt_suite
+    normalized_prompts: list[dict[str, Any]] = []
+    for item in prompt_suite:
+        if not isinstance(item, dict):
+            continue
+        prompt_id = str(item.get("id", "")).strip()
+        instruction = str(item.get("instruction", "")).strip()
+        if not prompt_id or not instruction:
+            continue
+        normalized = dict(item)
+        normalized["id"] = prompt_id
+        normalized["instruction"] = instruction
+        normalized["input"] = str(item.get("input", ""))
+        normalized["category"] = str(item.get("category", "general")).strip() or "general"
+        normalized["requires_php"] = bool(item.get("requires_php", prompt_id in PROMPTS_REQUIRING_PHP_SNIPPET))
+        normalized["require_fenced_php"] = bool(item.get("require_fenced_php", False))
+        normalized["required_substrings"] = [str(value) for value in item.get("required_substrings", []) if str(value).strip()]
+        normalized["required_regex"] = [str(value) for value in item.get("required_regex", []) if str(value).strip()]
+        normalized_prompts.append(normalized)
+    merged["prompt_suite"] = normalized_prompts or DEFAULT_PROMPT_SUITE
     merged["seed"] = int(merged.get("seed", defaults["seed"]))
     merged["max_new_tokens"] = int(merged.get("max_new_tokens", defaults["max_new_tokens"]))
     merged["max_models"] = int(merged.get("max_models", defaults["max_models"]))
@@ -174,6 +257,29 @@ def _extract_fenced_code_blocks(output: str) -> list[dict[str, str]]:
     return blocks
 
 
+def _has_explicit_fenced_php_block(output: str) -> bool:
+    for block in _extract_fenced_code_blocks(output):
+        if block["language"] in {"php", "phtml"}:
+            return True
+    return False
+
+
+def _artifact_guard(output: str) -> dict[str, Any]:
+    has_wrapper = _has_prompt_wrapper_leakage(output)
+    has_special = _has_special_token_artifact(output)
+    reasons: list[str] = []
+    if has_wrapper:
+        reasons.append("prompt_wrapper_leakage")
+    if has_special:
+        reasons.append("special_token_or_fim_artifact")
+    return {
+        "is_clean": len(reasons) == 0,
+        "has_prompt_wrapper_leakage": has_wrapper,
+        "has_special_token_artifact": has_special,
+        "reasons": reasons,
+    }
+
+
 def _read_php_snippet_policy(config: dict[str, Any]) -> str:
     policy = str(config.get("php_snippet_policy", "php_only")).strip().lower()
     return policy if policy in {"php_only", "all_fences"} else "php_only"
@@ -226,8 +332,8 @@ def _compute_format_sanity(output: str) -> dict[str, Any]:
             current_streak = 0
 
     repeated_line_ratio = (max(counts.values()) / len(lines)) if len(lines) >= 20 and counts else 0.0
-    has_prompt_wrapper_echo = bool(PROMPT_WRAPPER_RE.search(output))
-    has_special_token_artifact = bool(SPECIAL_TOKEN_ARTIFACT_RE.search(output) or "_closed_prs" in output.lower())
+    has_prompt_wrapper_echo = _has_prompt_wrapper_leakage(output)
+    has_special_token_artifact = _has_special_token_artifact(output)
 
     penalties = 0.0
     if has_prompt_wrapper_echo:
@@ -250,7 +356,8 @@ def _compute_format_sanity(output: str) -> dict[str, Any]:
     }
 
 
-def _required_checks_for_prompt(prompt_id: str, output: str) -> tuple[dict[str, bool], list[str]]:
+def _required_checks_for_prompt(prompt_id: str, output: str, prompt: dict[str, Any] | None = None) -> tuple[dict[str, bool], list[str]]:
+    prompt_cfg = prompt or {}
     checks: dict[str, bool] = {"non_empty_output": bool(output.strip())}
     lower = output.lower()
 
@@ -295,18 +402,42 @@ def _required_checks_for_prompt(prompt_id: str, output: str) -> tuple[dict[str, 
     else:
         required = ["non_empty_output"]
 
+    if bool(prompt_cfg.get("require_fenced_php", False)):
+        checks["has_fenced_php_block"] = _has_explicit_fenced_php_block(output)
+        required.append("has_fenced_php_block")
+
+    required_substrings = [str(value).strip() for value in prompt_cfg.get("required_substrings", []) if str(value).strip()]
+    for term in required_substrings:
+        key = f"contains::{term.lower()}"
+        checks[key] = term.lower() in lower
+        required.append(key)
+
+    required_regex = [str(value).strip() for value in prompt_cfg.get("required_regex", []) if str(value).strip()]
+    for pattern in required_regex:
+        key = f"regex::{pattern}"
+        try:
+            checks[key] = bool(re.search(pattern, output, re.IGNORECASE | re.MULTILINE))
+        except re.error:
+            checks[key] = False
+        required.append(key)
+
+    # Keep required order stable without duplicates.
+    seen: set[str] = set()
+    required = [name for name in required if not (name in seen or seen.add(name))]
     return checks, required
 
 
 def _apply_external_required_checks(
     prompt_id: str,
+    prompt: dict[str, Any] | None,
     checks: dict[str, bool],
     required: list[str],
     external_checks: dict[str, Any],
 ) -> tuple[dict[str, bool], list[str]]:
     updated_checks = dict(checks)
     updated_required = list(required)
-    if prompt_id in PROMPTS_REQUIRING_PHP_SNIPPET:
+    requires_php = bool((prompt or {}).get("requires_php", prompt_id in PROMPTS_REQUIRING_PHP_SNIPPET))
+    if requires_php:
         has_php_snippet = int(external_checks.get("php_checked_count", 0)) > 0
         updated_checks["has_php_snippet"] = has_php_snippet
         if "has_php_snippet" not in updated_required:
@@ -610,7 +741,12 @@ def _run_external_checks(output: str, eval_cfg: dict[str, Any]) -> dict[str, Any
     return external
 
 
-def _score_result(required_checks: dict[str, bool], required: list[str], external_checks: dict[str, Any]) -> dict[str, Any]:
+def _score_result(
+    required_checks: dict[str, bool],
+    required: list[str],
+    external_checks: dict[str, Any],
+    artifact_guard: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     required_total = len(required)
     required_passed = sum(1 for name in required if required_checks.get(name))
     required_score = (required_passed / required_total) if required_total else 1.0
@@ -618,15 +754,24 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
     php_checked_count = int(external_checks.get("php_checked_count", 0))
     missing_required_php_snippet = requires_php_snippet and php_checked_count == 0
 
-    lint_weight = 0.0
-    lint_score = 1.0
+    semantic_weight = 1.0
+    semantic_score = required_score
+    style_weight = 0.0
+    style_score = 1.0
+
     php_lint = external_checks.get("php_lint", {})
     if php_lint.get("enabled") and php_lint.get("available") and php_lint.get("checked", 0) > 0:
-        lint_weight += 0.1
-        lint_score *= php_lint.get("passed", 0) / max(1, php_lint.get("checked", 0))
+        semantic_weight += 0.2
+        semantic_score += 0.2 * (php_lint.get("passed", 0) / max(1, php_lint.get("checked", 0)))
     elif missing_required_php_snippet and php_lint.get("enabled") and php_lint.get("available"):
-        lint_weight += 0.1
-        lint_score *= 0.0
+        semantic_weight += 0.2
+
+    phpstan = external_checks.get("phpstan", {})
+    if phpstan.get("enabled") and phpstan.get("available") and phpstan.get("checked", 0) > 0:
+        semantic_weight += 0.2
+        semantic_score += 0.2 * (phpstan.get("passed", 0) / max(1, phpstan.get("checked", 0)))
+    elif missing_required_php_snippet and phpstan.get("enabled") and phpstan.get("available"):
+        semantic_weight += 0.2
 
     phpcs = external_checks.get("phpcs", {})
     if (
@@ -635,28 +780,26 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
         and phpcs.get("drupal_standard_available")
         and phpcs.get("checked", 0) > 0
     ):
-        lint_weight += 0.1
-        lint_score *= phpcs.get("passed", 0) / max(1, phpcs.get("checked", 0))
+        style_weight += 1.0
+        style_score = phpcs.get("passed", 0) / max(1, phpcs.get("checked", 0))
     elif (
         missing_required_php_snippet
         and phpcs.get("enabled")
         and phpcs.get("available")
         and phpcs.get("drupal_standard_available")
     ):
-        lint_weight += 0.1
-        lint_score *= 0.0
+        style_weight += 1.0
+        style_score = 0.0
 
-    phpstan = external_checks.get("phpstan", {})
-    if phpstan.get("enabled") and phpstan.get("available") and phpstan.get("checked", 0) > 0:
-        lint_weight += 0.1
-        lint_score *= phpstan.get("passed", 0) / max(1, phpstan.get("checked", 0))
-    elif missing_required_php_snippet and phpstan.get("enabled") and phpstan.get("available"):
-        lint_weight += 0.1
-        lint_score *= 0.0
+    semantic_score = semantic_score / max(semantic_weight, 1.0)
+    semantic_score = round(max(0.0, min(1.0, semantic_score)), 4)
+    style_score = round(max(0.0, min(1.0, style_score if style_weight > 0 else 1.0)), 4)
 
-    base_weight = 1.0 - lint_weight
-    score = (required_score * base_weight) + (lint_score * lint_weight)
-    score = round(score, 4)
+    guard = artifact_guard or {"is_clean": True}
+    passes_artifact_guard = bool(guard.get("is_clean", True))
+    if not passes_artifact_guard:
+        semantic_score = 0.0
+        style_score = min(style_score, 0.2)
 
     passes_required = required_passed == required_total
     passes_php_lint = not (
@@ -688,8 +831,15 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
         or (missing_required_php_snippet and phpstan.get("enabled") and phpstan.get("available"))
     )
 
+    passes_semantic = passes_required and passes_php_lint and passes_phpstan and passes_artifact_guard
+    passes_style = passes_phpcs
+    overall_score = round((semantic_score * 0.8) + (style_score * 0.2), 4)
+
     return {
-        "score": score,
+        "semantic_score": semantic_score,
+        "style_score": style_score,
+        "overall_score": overall_score,
+        "score": overall_score,
         "required_total": required_total,
         "required_passed": required_passed,
         "required_score": round(required_score, 4),
@@ -697,7 +847,11 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
         "passes_php_lint": passes_php_lint,
         "passes_phpcs": passes_phpcs,
         "passes_phpstan": passes_phpstan,
-        "passed": passes_required and passes_php_lint and passes_phpcs and passes_phpstan,
+        "passes_artifact_guard": passes_artifact_guard,
+        "passes_semantic": passes_semantic,
+        "passes_style": passes_style,
+        "passed": passes_semantic,
+        "style_passed": passes_style,
     }
 
 
@@ -712,6 +866,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     per_model: list[dict[str, Any]] = []
     all_fine_scores: list[float] = []
     all_base_scores: list[float] = []
+    all_fine_semantic_scores: list[float] = []
+    all_base_semantic_scores: list[float] = []
+    all_fine_style_scores: list[float] = []
+    all_base_style_scores: list[float] = []
 
     for model_name in model_names:
         model_results = [result for result in results if result["model_name"] == model_name]
@@ -720,10 +878,18 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
         fine_scores = [float(item["score"]) for item in fine]
         base_scores = [float(item["score"]) for item in base]
+        fine_semantic_scores = [float(item.get("semantic_score", item["score"])) for item in fine]
+        base_semantic_scores = [float(item.get("semantic_score", item["score"])) for item in base]
+        fine_style_scores = [float(item.get("style_score", 1.0)) for item in fine]
+        base_style_scores = [float(item.get("style_score", 1.0)) for item in base]
         fine_format_scores = [float(item.get("format_sanity", {}).get("score", 1.0)) for item in fine]
         base_format_scores = [float(item.get("format_sanity", {}).get("score", 1.0)) for item in base]
         all_fine_scores.extend(fine_scores)
         all_base_scores.extend(base_scores)
+        all_fine_semantic_scores.extend(fine_semantic_scores)
+        all_base_semantic_scores.extend(base_semantic_scores)
+        all_fine_style_scores.extend(fine_style_scores)
+        all_base_style_scores.extend(base_style_scores)
 
         by_prompt = {item["prompt_id"]: item for item in base}
         prompt_deltas = []
@@ -735,6 +901,12 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             if not baseline_item:
                 continue
             delta = round(float(fine_item["score"]) - float(baseline_item["score"]), 4)
+            semantic_delta = round(
+                float(fine_item.get("semantic_score", fine_item["score"]))
+                - float(baseline_item.get("semantic_score", baseline_item["score"])),
+                4,
+            )
+            style_delta = round(float(fine_item.get("style_score", 1.0)) - float(baseline_item.get("style_score", 1.0)), 4)
             if delta > 0:
                 fine_wins += 1
             elif delta < 0:
@@ -748,11 +920,17 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
                     "fine_tuned_score": fine_item["score"],
                     "baseline_score": baseline_item["score"],
                     "delta": delta,
+                    "semantic_delta": semantic_delta,
+                    "style_delta": style_delta,
                 }
             )
 
         fine_avg = _average(fine_scores)
         base_avg = _average(base_scores)
+        fine_semantic_avg = _average(fine_semantic_scores)
+        base_semantic_avg = _average(base_semantic_scores)
+        fine_style_avg = _average(fine_style_scores)
+        base_style_avg = _average(base_style_scores)
         per_model.append(
             {
                 "model_name": model_name,
@@ -760,8 +938,16 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
                 "fine_tuned_avg_score": fine_avg,
                 "baseline_avg_score": base_avg,
                 "delta_avg_score": round(fine_avg - base_avg, 4),
+                "fine_tuned_avg_semantic_score": fine_semantic_avg,
+                "baseline_avg_semantic_score": base_semantic_avg,
+                "delta_avg_semantic_score": round(fine_semantic_avg - base_semantic_avg, 4),
+                "fine_tuned_avg_style_score": fine_style_avg,
+                "baseline_avg_style_score": base_style_avg,
+                "delta_avg_style_score": round(fine_style_avg - base_style_avg, 4),
                 "fine_tuned_pass_rate": _average([1.0 if item["passed"] else 0.0 for item in fine]),
                 "baseline_pass_rate": _average([1.0 if item["passed"] else 0.0 for item in base]),
+                "fine_tuned_style_pass_rate": _average([1.0 if item.get("passes_style", True) else 0.0 for item in fine]),
+                "baseline_style_pass_rate": _average([1.0 if item.get("passes_style", True) else 0.0 for item in base]),
                 "fine_tuned_format_sanity_avg": _average(fine_format_scores),
                 "baseline_format_sanity_avg": _average(base_format_scores),
                 "delta_format_sanity_avg": round(_average(fine_format_scores) - _average(base_format_scores), 4),
@@ -783,6 +969,14 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "overall_fine_tuned_avg_score": _average(all_fine_scores),
         "overall_baseline_avg_score": _average(all_base_scores),
         "overall_delta_avg_score": round(_average(all_fine_scores) - _average(all_base_scores), 4),
+        "overall_fine_tuned_avg_semantic_score": _average(all_fine_semantic_scores),
+        "overall_baseline_avg_semantic_score": _average(all_base_semantic_scores),
+        "overall_delta_avg_semantic_score": round(
+            _average(all_fine_semantic_scores) - _average(all_base_semantic_scores), 4
+        ),
+        "overall_fine_tuned_avg_style_score": _average(all_fine_style_scores),
+        "overall_baseline_avg_style_score": _average(all_base_style_scores),
+        "overall_delta_avg_style_score": round(_average(all_fine_style_scores) - _average(all_base_style_scores), 4),
         "models": per_model,
     }
 
@@ -899,6 +1093,7 @@ def _load_model_for_evaluation(
 
 def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> int:
     eval_cfg = _read_eval_config(config)
+    evaluator_metadata = _build_evaluator_metadata(eval_cfg)
     eval_dir = root / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
     sample_outputs_dir = eval_dir / "sample_outputs"
@@ -906,6 +1101,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
 
     manifest = Manifest("evaluation", eval_dir)
     manifest.data["config"] = eval_cfg
+    manifest.data["evaluator"] = evaluator_metadata
 
     models_to_eval = _resolve_models_for_eval(config, eval_cfg)
     if not models_to_eval:
@@ -1014,16 +1210,18 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         eval_cfg=eval_cfg,
                     )
 
-                    checks, required = _required_checks_for_prompt(prompt_id, output)
+                    checks, required = _required_checks_for_prompt(prompt_id, output, prompt=prompt)
                     external_checks = _run_external_checks(output, eval_cfg)
                     checks, required = _apply_external_required_checks(
                         prompt_id=prompt_id,
+                        prompt=prompt,
                         checks=checks,
                         required=required,
                         external_checks=external_checks,
                     )
                     format_sanity = _compute_format_sanity(output)
-                    score = _score_result(checks, required, external_checks)
+                    artifact_guard = _artifact_guard(output)
+                    score = _score_result(checks, required, external_checks, artifact_guard=artifact_guard)
 
                     output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}.txt"
                     with open(output_path, "w", encoding="utf-8") as handle:
@@ -1044,6 +1242,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         "required_checks": required,
                         "external_checks": external_checks,
                         "format_sanity": format_sanity,
+                        "artifact_guard": artifact_guard,
                     }
                     result.update(score)
                     all_results.append(result)
@@ -1065,6 +1264,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
         "seed": seed,
         "mode": eval_cfg.get("mode", "test_run"),
         "prompt_suite": prompt_suite,
+        "evaluator": evaluator_metadata,
         "blocked_models": blocked_models,
         "summary": summary,
         "results": all_results,
@@ -1084,6 +1284,15 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
             "overall_fine_tuned_avg_score": summary["overall_fine_tuned_avg_score"],
             "overall_baseline_avg_score": summary["overall_baseline_avg_score"],
             "overall_delta_avg_score": summary["overall_delta_avg_score"],
+            "overall_fine_tuned_avg_semantic_score": summary["overall_fine_tuned_avg_semantic_score"],
+            "overall_baseline_avg_semantic_score": summary["overall_baseline_avg_semantic_score"],
+            "overall_delta_avg_semantic_score": summary["overall_delta_avg_semantic_score"],
+            "overall_fine_tuned_avg_style_score": summary["overall_fine_tuned_avg_style_score"],
+            "overall_baseline_avg_style_score": summary["overall_baseline_avg_style_score"],
+            "overall_delta_avg_style_score": summary["overall_delta_avg_style_score"],
+            "evaluator_logic_version": evaluator_metadata["logic_version"],
+            "evaluator_logic_sha256": evaluator_metadata["logic_sha256"],
+            "prompt_suite_sha256": evaluator_metadata["prompt_suite_sha256"],
             "blocked_models": len(blocked_models),
             "result_count": len(all_results),
         }

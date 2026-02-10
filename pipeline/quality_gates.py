@@ -14,10 +14,16 @@ from .manifest import Manifest, calculate_hash
 SYMBOL_PROMPT_RE = re.compile(
     r"^Show me the implementation of the (class|interface|trait|enum) ([A-Za-z_][A-Za-z0-9_]*) in the file (.+)\.$"
 )
-PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
+PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output|response|assistant|user)\s*:")
+MALFORMED_WRAPPER_RE = re.compile(
+    r"(?im)(\[\s*/?inst\s*\]|^\s*###\s*(instruction|input|output|response)\s*:|<\|im_(start|end)\|>|<\|assistant\|>|<\|user\|>)"
+)
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
 SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
+FIM_MARKER_RE = re.compile(
+    r"(?i)(<\|fim_(prefix|middle|suffix|pad)\|>|<fim_(prefix|middle|suffix|pad)>|<\|file_sep\|>)"
+)
 PROCEDURAL_EXTENSIONS = (".module", ".install", ".inc", ".theme", ".profile")
 WHITESPACE_RE = re.compile(r"\s+")
 ROOT_PROCEDURAL_PHP = {
@@ -218,8 +224,14 @@ class QualityGate:
         return False
 
     @staticmethod
+    def _has_prompt_wrapper_leakage(output: str) -> bool:
+        return bool(PROMPT_WRAPPER_RE.search(output) or MALFORMED_WRAPPER_RE.search(output))
+
+    @staticmethod
     def _has_special_token_artifact(output: str) -> bool:
         if SPECIAL_TOKEN_ARTIFACT_RE.search(output):
+            return True
+        if FIM_MARKER_RE.search(output):
             return True
         return "_closed_prs" in output.lower()
 
@@ -522,7 +534,7 @@ class QualityGate:
             return False, "too_short"
         if len(output) > self._effective_max_chars(sample_type):
             return False, "too_long"
-        if self.reject_prompt_wrapper_echo and PROMPT_WRAPPER_RE.search(output):
+        if self.reject_prompt_wrapper_echo and self._has_prompt_wrapper_leakage(output):
             return False, "prompt_wrapper_echo"
         if self.reject_path_leakage_tokens:
             model_facing_text = "\n".join([instruction, str(sample.get("input", "")), output]).lower()
