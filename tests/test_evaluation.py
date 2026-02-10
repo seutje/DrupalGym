@@ -1,6 +1,8 @@
 import unittest
 import tempfile
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from pipeline.evaluation import (
@@ -12,6 +14,7 @@ from pipeline.evaluation import (
     _reset_sample_outputs_dir,
     _required_checks_for_prompt,
     _run_external_checks,
+    _run_phpcs,
     _score_result,
     _select_snippets_for_checks,
     summarize_results,
@@ -240,6 +243,127 @@ class EvaluationHelpersTest(unittest.TestCase):
         self.assertFalse(score["passes_php_lint"])
         self.assertFalse(score["passed"])
         self.assertLess(score["score"], 1.0)
+
+    def test_score_result_fails_lint_gates_when_required_php_snippet_missing(self):
+        required_checks = {
+            "non_empty_output": True,
+            "has_php_snippet": False,
+        }
+        required = ["non_empty_output", "has_php_snippet"]
+        external = {
+            "php_checked_count": 0,
+            "php_lint": {
+                "enabled": True,
+                "available": True,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+            "phpcs": {
+                "enabled": True,
+                "available": True,
+                "drupal_standard_available": True,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+            "phpstan": {
+                "enabled": True,
+                "available": True,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+        }
+
+        score = _score_result(required_checks, required, external)
+        self.assertFalse(score["passes_php_lint"])
+        self.assertFalse(score["passes_phpcs"])
+        self.assertFalse(score["passes_phpstan"])
+        self.assertFalse(score["passed"])
+        self.assertLess(score["score"], 0.5)
+
+    def test_score_result_keeps_lint_neutral_when_php_not_required_and_no_snippets(self):
+        required_checks = {
+            "non_empty_output": True,
+        }
+        required = ["non_empty_output"]
+        external = {
+            "php_checked_count": 0,
+            "php_lint": {
+                "enabled": True,
+                "available": True,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+            "phpcs": {
+                "enabled": True,
+                "available": True,
+                "drupal_standard_available": True,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+            "phpstan": {
+                "enabled": True,
+                "available": True,
+                "checked": 0,
+                "passed": 0,
+                "failed": 0,
+                "errors": [],
+            },
+        }
+
+        score = _score_result(required_checks, required, external)
+        self.assertTrue(score["passes_php_lint"])
+        self.assertTrue(score["passes_phpcs"])
+        self.assertTrue(score["passes_phpstan"])
+        self.assertTrue(score["passes_required"])
+        self.assertTrue(score["passed"])
+        self.assertEqual(score["score"], 1.0)
+
+    def test_run_phpcs_ignores_temp_filename_classname_noise(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".php", delete=False, encoding="utf-8") as handle:
+            tmp_path = Path(handle.name)
+        report = {
+            "totals": {"errors": 1, "warnings": 0, "fixable": 0},
+            "files": {
+                str(tmp_path): {
+                    "errors": 1,
+                    "warnings": 0,
+                    "messages": [
+                        {
+                            "message": "Class name doesn't match filename; expected \"class tmpfile\"",
+                            "source": "PSR1.Classes.ClassDeclaration.InvalidClassName",
+                            "type": "ERROR",
+                            "line": 1,
+                            "column": 1,
+                            "fixable": False,
+                        }
+                    ],
+                }
+            },
+        }
+        proc = SimpleNamespace(returncode=1, stdout=json.dumps(report), stderr="")
+
+        with (
+            patch("pipeline.evaluation.shutil.which", return_value="/usr/bin/phpcs"),
+            patch("pipeline.evaluation._has_drupal_phpcs_standard", return_value=True),
+            patch("pipeline.evaluation._write_temp_php", return_value=tmp_path),
+            patch("pipeline.evaluation.subprocess.run", return_value=proc),
+        ):
+            summary = _run_phpcs(["class Example {}"])
+
+        self.assertEqual(summary["checked"], 1)
+        self.assertEqual(summary["passed"], 1)
+        self.assertEqual(summary["failed"], 0)
+        self.assertEqual(summary["errors"], [])
 
     def test_summarize_results_tracks_prompt_deltas(self):
         results = [

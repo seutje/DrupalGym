@@ -42,6 +42,10 @@ NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 PHPSTAN_SYNTAX_ERROR_RE = re.compile(r"(syntax error|parse error)", re.IGNORECASE)
 SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
 FENCED_CODE_BLOCK_RE = re.compile(r"```([A-Za-z0-9_+-]*)\n(.*?)```", re.DOTALL)
+PHPCS_TEMPFILE_CLASSNAME_RE = re.compile(r"class name doesn't match filename", re.IGNORECASE)
+PHPCS_TEMPFILE_NOISE_SOURCES = {
+    "PSR1.Classes.ClassDeclaration.InvalidClassName",
+}
 PROMPTS_REQUIRING_PHP_SNIPPET = {"block_attribute", "service_di", "routing_yaml"}
 
 
@@ -367,6 +371,49 @@ def _phpcs_runtime_misconfigured(output: str) -> bool:
     ) or "coding standard \"drupal\" is not installed" in lower
 
 
+def _parse_phpcs_report(stdout: str) -> dict[str, Any] | None:
+    payload = (stdout or "").strip()
+    if not payload:
+        return None
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _is_tempfile_phpcs_noise(message: dict[str, Any]) -> bool:
+    source = str(message.get("source", "")).strip()
+    text = str(message.get("message", "")).strip()
+    return source in PHPCS_TEMPFILE_NOISE_SOURCES or bool(PHPCS_TEMPFILE_CLASSNAME_RE.search(text))
+
+
+def _collect_phpcs_messages(report: dict[str, Any]) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for file_info in report.get("files", {}).values():
+        if not isinstance(file_info, dict):
+            continue
+        for item in file_info.get("messages", []):
+            if isinstance(item, dict):
+                messages.append(item)
+    return messages
+
+
+def _format_phpcs_messages(messages: list[dict[str, Any]], max_items: int = 5) -> str:
+    lines: list[str] = []
+    for item in messages[:max_items]:
+        line = item.get("line")
+        source = item.get("source")
+        text = str(item.get("message", "")).strip()
+        prefix = f"line {line}" if line is not None else "line ?"
+        if source:
+            prefix += f" [{source}]"
+        lines.append(f"{prefix}: {text}")
+    if len(messages) > max_items:
+        lines.append(f"... and {len(messages) - max_items} more issue(s)")
+    return "; ".join(lines)
+
+
 def _run_phpcs(snippets: list[str]) -> dict[str, Any]:
     phpcs_bin = shutil.which("phpcs")
     summary: dict[str, Any] = {
@@ -390,7 +437,7 @@ def _run_phpcs(snippets: list[str]) -> dict[str, Any]:
         tmp_path = _write_temp_php(snippet)
         try:
             proc = subprocess.run(
-                [phpcs_bin, "--standard=Drupal", str(tmp_path)],
+                [phpcs_bin, "--standard=Drupal", "--report=json", str(tmp_path)],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -411,9 +458,20 @@ def _run_phpcs(snippets: list[str]) -> dict[str, Any]:
                 summary["failed"] = 0
                 summary["errors"] = [{"snippet": index, "message": combined[:500]}]
                 break
+            report = _parse_phpcs_report(proc.stdout or "")
+            if report is not None:
+                all_messages = _collect_phpcs_messages(report)
+                relevant = [item for item in all_messages if not _is_tempfile_phpcs_noise(item)]
+                if not relevant:
+                    summary["passed"] += 1
+                    continue
+                summary["failed"] += 1
+                message = _format_phpcs_messages(relevant)
+                summary["errors"].append({"snippet": index, "message": message[:500]})
+                continue
+
             summary["failed"] += 1
-            message = combined
-            summary["errors"].append({"snippet": index, "message": message[:500]})
+            summary["errors"].append({"snippet": index, "message": combined[:500]})
     return summary
 
 
@@ -556,6 +614,9 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
     required_total = len(required)
     required_passed = sum(1 for name in required if required_checks.get(name))
     required_score = (required_passed / required_total) if required_total else 1.0
+    requires_php_snippet = "has_php_snippet" in required
+    php_checked_count = int(external_checks.get("php_checked_count", 0))
+    missing_required_php_snippet = requires_php_snippet and php_checked_count == 0
 
     lint_weight = 0.0
     lint_score = 1.0
@@ -563,6 +624,9 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
     if php_lint.get("enabled") and php_lint.get("available") and php_lint.get("checked", 0) > 0:
         lint_weight += 0.1
         lint_score *= php_lint.get("passed", 0) / max(1, php_lint.get("checked", 0))
+    elif missing_required_php_snippet and php_lint.get("enabled") and php_lint.get("available"):
+        lint_weight += 0.1
+        lint_score *= 0.0
 
     phpcs = external_checks.get("phpcs", {})
     if (
@@ -573,11 +637,22 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
     ):
         lint_weight += 0.1
         lint_score *= phpcs.get("passed", 0) / max(1, phpcs.get("checked", 0))
+    elif (
+        missing_required_php_snippet
+        and phpcs.get("enabled")
+        and phpcs.get("available")
+        and phpcs.get("drupal_standard_available")
+    ):
+        lint_weight += 0.1
+        lint_score *= 0.0
 
     phpstan = external_checks.get("phpstan", {})
     if phpstan.get("enabled") and phpstan.get("available") and phpstan.get("checked", 0) > 0:
         lint_weight += 0.1
         lint_score *= phpstan.get("passed", 0) / max(1, phpstan.get("checked", 0))
+    elif missing_required_php_snippet and phpstan.get("enabled") and phpstan.get("available"):
+        lint_weight += 0.1
+        lint_score *= 0.0
 
     base_weight = 1.0 - lint_weight
     score = (required_score * base_weight) + (lint_score * lint_weight)
@@ -585,20 +660,32 @@ def _score_result(required_checks: dict[str, bool], required: list[str], externa
 
     passes_required = required_passed == required_total
     passes_php_lint = not (
-        php_lint.get("enabled") and php_lint.get("available") and php_lint.get("checked", 0) > 0 and php_lint.get("failed", 0) > 0
+        (php_lint.get("enabled") and php_lint.get("available") and php_lint.get("checked", 0) > 0 and php_lint.get("failed", 0) > 0)
+        or (missing_required_php_snippet and php_lint.get("enabled") and php_lint.get("available"))
     )
     passes_phpcs = not (
-        phpcs.get("enabled")
-        and phpcs.get("available")
-        and phpcs.get("drupal_standard_available")
-        and phpcs.get("checked", 0) > 0
-        and phpcs.get("failed", 0) > 0
+        (
+            phpcs.get("enabled")
+            and phpcs.get("available")
+            and phpcs.get("drupal_standard_available")
+            and phpcs.get("checked", 0) > 0
+            and phpcs.get("failed", 0) > 0
+        )
+        or (
+            missing_required_php_snippet
+            and phpcs.get("enabled")
+            and phpcs.get("available")
+            and phpcs.get("drupal_standard_available")
+        )
     )
     passes_phpstan = not (
-        phpstan.get("enabled")
-        and phpstan.get("available")
-        and phpstan.get("checked", 0) > 0
-        and phpstan.get("failed", 0) > 0
+        (
+            phpstan.get("enabled")
+            and phpstan.get("available")
+            and phpstan.get("checked", 0) > 0
+            and phpstan.get("failed", 0) > 0
+        )
+        or (missing_required_php_snippet and phpstan.get("enabled") and phpstan.get("available"))
     )
 
     return {
