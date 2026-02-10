@@ -13,6 +13,7 @@ from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
 
 EVALUATOR_LOGIC_VERSION = "2026-02-10.1"
+ARTIFACT_BLOCKLIST_VERSION = "2026-02-10.1"
 DEFAULT_PROMPT_SUITE = [
     {
         "id": "block_attribute",
@@ -70,12 +71,42 @@ SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
 FIM_MARKER_RE = re.compile(
     r"(?i)(<\|fim_(prefix|middle|suffix|pad)\|>|<fim_(prefix|middle|suffix|pad)>|<\|file_sep\|>)"
 )
+GENERATION_STOP_MARKER_RE = re.compile(
+    r"(?im)(<\|fim_(prefix|middle|suffix|pad)\|>|<fim_(prefix|middle|suffix|pad)>|<\|file_sep\|>|<\|im_(start|end)\|>|<\|assistant\|>|<\|user\|>|^\s*(instruction|input|output|response)\s*:|^\s*###\s*(instruction|input|output|response)\s*:)"
+)
 FENCED_CODE_BLOCK_RE = re.compile(r"```([A-Za-z0-9_+-]*)\n(.*?)```", re.DOTALL)
 PHPCS_TEMPFILE_CLASSNAME_RE = re.compile(r"class name doesn't match filename", re.IGNORECASE)
 PHPCS_TEMPFILE_NOISE_SOURCES = {
     "PSR1.Classes.ClassDeclaration.InvalidClassName",
 }
 PROMPTS_REQUIRING_PHP_SNIPPET = {"block_attribute", "service_di", "routing_yaml"}
+DEFAULT_GENERATION_BLOCKLIST_STRINGS = [
+    "<|fim_prefix|>",
+    "<|fim_middle|>",
+    "<|fim_suffix|>",
+    "<|fim_pad|>",
+    "<fim_prefix>",
+    "<fim_middle>",
+    "<fim_suffix>",
+    "<fim_pad>",
+    "<|file_sep|>",
+    "<|im_start|>",
+    "<|im_end|>",
+    "<|assistant|>",
+    "<|user|>",
+    "### Instruction:",
+    "### Response:",
+]
+DEFAULT_GENERATION_STOP_REGEX = [
+    r"<\|fim_(prefix|middle|suffix|pad)\|>",
+    r"<fim_(prefix|middle|suffix|pad)>",
+    r"<\|file_sep\|>",
+    r"<\|im_(start|end)\|>",
+    r"<\|assistant\|>",
+    r"<\|user\|>",
+    r"(?m)^\s*(instruction|input|output|response)\s*:",
+    r"(?m)^\s*###\s*(instruction|input|output|response)\s*:",
+]
 
 
 def _iso_timestamp() -> str:
@@ -92,7 +123,35 @@ def _hash_json_payload(payload: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _build_evaluator_metadata(eval_cfg: dict[str, Any]) -> dict[str, Any]:
+def _string_list(value: Any, fallback: list[str]) -> list[str]:
+    if not isinstance(value, list):
+        return list(fallback)
+    normalized = [str(item).strip() for item in value if str(item).strip()]
+    return normalized or list(fallback)
+
+
+def _build_generation_profile(eval_cfg: dict[str, Any]) -> dict[str, Any]:
+    profile = {
+        "do_sample": False,
+        "max_new_tokens": int(eval_cfg.get("max_new_tokens", 512)),
+        "repetition_penalty": float(eval_cfg.get("repetition_penalty", 1.0)),
+        "no_repeat_ngram_size": int(eval_cfg.get("no_repeat_ngram_size", 0)),
+        "generation_blocklist_strings": _string_list(
+            eval_cfg.get("generation_blocklist_strings"), DEFAULT_GENERATION_BLOCKLIST_STRINGS
+        ),
+        "generation_stop_regex": _string_list(eval_cfg.get("generation_stop_regex"), DEFAULT_GENERATION_STOP_REGEX),
+        "apply_generation_stop_truncation": bool(eval_cfg.get("apply_generation_stop_truncation", True)),
+        "strict_contract_mode": bool(eval_cfg.get("strict_contract_mode", True)),
+        "enforce_no_outside_prose_for_php_required": bool(
+            eval_cfg.get("enforce_no_outside_prose_for_php_required", True)
+        ),
+        "artifact_blocklist_version": ARTIFACT_BLOCKLIST_VERSION,
+    }
+    profile["generation_profile_sha256"] = _hash_json_payload(profile)
+    return profile
+
+
+def _build_evaluator_metadata(eval_cfg: dict[str, Any], generation_profile: dict[str, Any]) -> dict[str, Any]:
     prompt_suite = eval_cfg.get("prompt_suite", [])
     scoring_profile = {
         "semantic_channels": ["required_checks", "php_lint", "phpstan", "artifact_guard"],
@@ -107,6 +166,8 @@ def _build_evaluator_metadata(eval_cfg: dict[str, Any]) -> dict[str, Any]:
         "logic_sha256": calculate_hash(Path(__file__)),
         "prompt_suite_size": len(prompt_suite) if isinstance(prompt_suite, list) else 0,
         "prompt_suite_sha256": _hash_json_payload(prompt_suite),
+        "generation_profile_sha256": generation_profile.get("generation_profile_sha256", ""),
+        "artifact_blocklist_version": generation_profile.get("artifact_blocklist_version", ARTIFACT_BLOCKLIST_VERSION),
         "scoring_profile": scoring_profile,
     }
 
@@ -121,6 +182,70 @@ def _has_special_token_artifact(output: str) -> bool:
     if FIM_MARKER_RE.search(output):
         return True
     return "_closed_prs" in output.lower()
+
+
+def _build_bad_words_ids(tokenizer, blocklist_strings: list[str]) -> list[list[int]]:
+    bad_words: list[list[int]] = []
+    seen: set[tuple[int, ...]] = set()
+    for marker in blocklist_strings:
+        try:
+            token_ids = tokenizer(marker, add_special_tokens=False).get("input_ids", [])
+        except Exception:
+            continue
+        if not isinstance(token_ids, list) or not token_ids:
+            continue
+        if token_ids and isinstance(token_ids[0], list):
+            token_ids = token_ids[0]
+        if not token_ids or not all(isinstance(token, int) for token in token_ids):
+            continue
+        key = tuple(token_ids)
+        if key in seen:
+            continue
+        seen.add(key)
+        bad_words.append(token_ids)
+    return bad_words
+
+
+def _compile_stop_patterns(patterns: list[str]) -> list[tuple[str, re.Pattern[str]]]:
+    compiled: list[tuple[str, re.Pattern[str]]] = []
+    for raw in patterns:
+        try:
+            compiled.append((raw, re.compile(raw, re.IGNORECASE | re.MULTILINE)))
+        except re.error:
+            continue
+    return compiled
+
+
+def _truncate_on_generation_markers(output: str, eval_cfg: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    trimmed = output.strip()
+    details = {
+        "truncated_on_marker": False,
+        "matched_stop_regex": None,
+        "matched_text": None,
+    }
+    if not bool(eval_cfg.get("apply_generation_stop_truncation", True)):
+        return trimmed, details
+
+    compiled = eval_cfg.get("_compiled_stop_patterns")
+    if not isinstance(compiled, list):
+        compiled = _compile_stop_patterns(_string_list(eval_cfg.get("generation_stop_regex"), DEFAULT_GENERATION_STOP_REGEX))
+
+    matches: list[tuple[int, int, str, str]] = []
+    for raw, pattern in compiled:
+        found = pattern.search(trimmed)
+        if found:
+            matches.append((found.start(), found.end(), raw, found.group(0)))
+    fallback = GENERATION_STOP_MARKER_RE.search(trimmed)
+    if fallback:
+        matches.append((fallback.start(), fallback.end(), "GENERATION_STOP_MARKER_RE", fallback.group(0)))
+    if not matches:
+        return trimmed, details
+
+    start, _end, raw, matched = min(matches, key=lambda item: item[0])
+    details["truncated_on_marker"] = True
+    details["matched_stop_regex"] = raw
+    details["matched_text"] = matched[:120]
+    return trimmed[:start].rstrip(), details
 
 
 def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -138,6 +263,11 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
         "php_snippet_policy": "php_only",
         "repetition_penalty": 1.0,
         "no_repeat_ngram_size": 0,
+        "generation_blocklist_strings": DEFAULT_GENERATION_BLOCKLIST_STRINGS,
+        "generation_stop_regex": DEFAULT_GENERATION_STOP_REGEX,
+        "apply_generation_stop_truncation": True,
+        "strict_contract_mode": True,
+        "enforce_no_outside_prose_for_php_required": True,
         "prompt_suite": DEFAULT_PROMPT_SUITE,
     }
     merged = defaults | config.get("evaluation", {})
@@ -157,6 +287,14 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
         normalized["category"] = str(item.get("category", "general")).strip() or "general"
         normalized["requires_php"] = bool(item.get("requires_php", prompt_id in PROMPTS_REQUIRING_PHP_SNIPPET))
         normalized["require_fenced_php"] = bool(item.get("require_fenced_php", False))
+        expected_fenced_blocks = item.get("expected_fenced_blocks")
+        normalized["expected_fenced_blocks"] = int(expected_fenced_blocks) if str(expected_fenced_blocks).strip().isdigit() else None
+        normalized["expected_fenced_languages"] = [
+            str(language).strip().lower()
+            for language in item.get("expected_fenced_languages", [])
+            if str(language).strip()
+        ]
+        normalized["enforce_no_outside_prose"] = item.get("enforce_no_outside_prose")
         normalized["required_substrings"] = [str(value) for value in item.get("required_substrings", []) if str(value).strip()]
         normalized["required_regex"] = [str(value) for value in item.get("required_regex", []) if str(value).strip()]
         normalized_prompts.append(normalized)
@@ -170,6 +308,20 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
     merged["php_snippet_policy"] = _read_php_snippet_policy(merged)
     merged["repetition_penalty"] = float(merged.get("repetition_penalty", defaults["repetition_penalty"]))
     merged["no_repeat_ngram_size"] = int(merged.get("no_repeat_ngram_size", defaults["no_repeat_ngram_size"]))
+    merged["generation_blocklist_strings"] = _string_list(
+        merged.get("generation_blocklist_strings"), DEFAULT_GENERATION_BLOCKLIST_STRINGS
+    )
+    merged["generation_stop_regex"] = _string_list(merged.get("generation_stop_regex"), DEFAULT_GENERATION_STOP_REGEX)
+    merged["apply_generation_stop_truncation"] = bool(
+        merged.get("apply_generation_stop_truncation", defaults["apply_generation_stop_truncation"])
+    )
+    merged["strict_contract_mode"] = bool(merged.get("strict_contract_mode", defaults["strict_contract_mode"]))
+    merged["enforce_no_outside_prose_for_php_required"] = bool(
+        merged.get(
+            "enforce_no_outside_prose_for_php_required",
+            defaults["enforce_no_outside_prose_for_php_required"],
+        )
+    )
     return merged
 
 
@@ -214,6 +366,13 @@ def _build_generation_kwargs(tokenizer, max_new_tokens: int, eval_cfg: dict[str,
     no_repeat_ngram_size = int(eval_cfg.get("no_repeat_ngram_size", 0))
     if no_repeat_ngram_size > 0:
         kwargs["no_repeat_ngram_size"] = no_repeat_ngram_size
+    bad_words_ids = eval_cfg.get("_bad_words_ids")
+    if not isinstance(bad_words_ids, list):
+        bad_words_ids = _build_bad_words_ids(
+            tokenizer, _string_list(eval_cfg.get("generation_blocklist_strings"), DEFAULT_GENERATION_BLOCKLIST_STRINGS)
+        )
+    if bad_words_ids:
+        kwargs["bad_words_ids"] = bad_words_ids
     return kwargs
 
 
@@ -257,6 +416,60 @@ def _extract_fenced_code_blocks(output: str) -> list[dict[str, str]]:
     return blocks
 
 
+def _contract_diagnostics(output: str) -> dict[str, Any]:
+    blocks = _extract_fenced_code_blocks(output)
+    languages = [block["language"] or "plain" for block in blocks]
+
+    outside_segments: list[str] = []
+    cursor = 0
+    for match in FENCED_CODE_BLOCK_RE.finditer(output):
+        segment = output[cursor : match.start()]
+        if segment.strip():
+            outside_segments.append(segment.strip())
+        cursor = match.end()
+    tail = output[cursor:]
+    if tail.strip():
+        outside_segments.append(tail.strip())
+
+    return {
+        "fenced_block_count": len(blocks),
+        "fenced_block_languages": languages,
+        "outside_prose_detected": len(outside_segments) > 0,
+        "outside_prose_excerpt": outside_segments[0][:160] if outside_segments else "",
+    }
+
+
+def _prompt_expected_contract(prompt: dict[str, Any], eval_cfg: dict[str, Any]) -> dict[str, Any]:
+    instruction_lower = str(prompt.get("instruction", "")).strip().lower()
+    expected_blocks = prompt.get("expected_fenced_blocks")
+    if expected_blocks is None:
+        if "two fenced blocks" in instruction_lower:
+            expected_blocks = 2
+        elif bool(prompt.get("require_fenced_php", False)) and bool(prompt.get("requires_php", False)):
+            expected_blocks = 1
+    expected_blocks_int = int(expected_blocks) if isinstance(expected_blocks, int) and expected_blocks > 0 else None
+
+    expected_languages = [
+        str(language).strip().lower()
+        for language in prompt.get("expected_fenced_languages", [])
+        if str(language).strip()
+    ]
+    if not expected_languages and expected_blocks_int == 1 and bool(prompt.get("requires_php", False)):
+        expected_languages = ["php"]
+    if not expected_languages and expected_blocks_int == 2 and "yaml" in instruction_lower:
+        expected_languages = ["yaml", "php"]
+
+    enforce_no_outside = prompt.get("enforce_no_outside_prose")
+    if enforce_no_outside is None:
+        enforce_no_outside = bool(eval_cfg.get("enforce_no_outside_prose_for_php_required", True))
+
+    return {
+        "expected_fenced_blocks": expected_blocks_int,
+        "expected_fenced_languages": expected_languages,
+        "enforce_no_outside_prose": bool(enforce_no_outside),
+    }
+
+
 def _has_explicit_fenced_php_block(output: str) -> bool:
     for block in _extract_fenced_code_blocks(output):
         if block["language"] in {"php", "phtml"}:
@@ -264,18 +477,22 @@ def _has_explicit_fenced_php_block(output: str) -> bool:
     return False
 
 
-def _artifact_guard(output: str) -> dict[str, Any]:
+def _artifact_guard(output: str, generation_guardrails: dict[str, Any] | None = None) -> dict[str, Any]:
     has_wrapper = _has_prompt_wrapper_leakage(output)
     has_special = _has_special_token_artifact(output)
+    guardrail_triggered = bool((generation_guardrails or {}).get("truncated_on_marker", False))
     reasons: list[str] = []
     if has_wrapper:
         reasons.append("prompt_wrapper_leakage")
     if has_special:
         reasons.append("special_token_or_fim_artifact")
+    if guardrail_triggered:
+        reasons.append("generation_stop_triggered_artifact")
     return {
         "is_clean": len(reasons) == 0,
         "has_prompt_wrapper_leakage": has_wrapper,
-        "has_special_token_artifact": has_special,
+        "has_special_token_artifact": has_special or guardrail_triggered,
+        "generation_stop_triggered": guardrail_triggered,
         "reasons": reasons,
     }
 
@@ -356,8 +573,16 @@ def _compute_format_sanity(output: str) -> dict[str, Any]:
     }
 
 
-def _required_checks_for_prompt(prompt_id: str, output: str, prompt: dict[str, Any] | None = None) -> tuple[dict[str, bool], list[str]]:
+def _required_checks_for_prompt(
+    prompt_id: str,
+    output: str,
+    prompt: dict[str, Any] | None = None,
+    eval_cfg: dict[str, Any] | None = None,
+    contract_diagnostics: dict[str, Any] | None = None,
+) -> tuple[dict[str, bool], list[str]]:
     prompt_cfg = prompt or {}
+    eval_config = eval_cfg or {}
+    contract_info = contract_diagnostics or _contract_diagnostics(output)
     checks: dict[str, bool] = {"non_empty_output": bool(output.strip())}
     lower = output.lower()
 
@@ -420,6 +645,26 @@ def _required_checks_for_prompt(prompt_id: str, output: str, prompt: dict[str, A
         except re.error:
             checks[key] = False
         required.append(key)
+
+    strict_contract_mode = bool(eval_config.get("strict_contract_mode", True))
+    requires_php = bool(prompt_cfg.get("requires_php", prompt_id in PROMPTS_REQUIRING_PHP_SNIPPET))
+    if strict_contract_mode and requires_php and bool(prompt_cfg):
+        contract_expectations = _prompt_expected_contract(prompt_cfg, eval_config)
+        expected_blocks = contract_expectations["expected_fenced_blocks"]
+        expected_languages = contract_expectations["expected_fenced_languages"]
+
+        if expected_blocks is not None:
+            checks["fenced_block_count"] = int(contract_info.get("fenced_block_count", 0)) == expected_blocks
+            required.append("fenced_block_count")
+
+        if expected_languages:
+            actual_languages = [str(value).strip().lower() for value in contract_info.get("fenced_block_languages", [])]
+            checks["fenced_language_order"] = actual_languages == expected_languages
+            required.append("fenced_language_order")
+
+        if bool(contract_expectations["enforce_no_outside_prose"]):
+            checks["no_outside_prose"] = not bool(contract_info.get("outside_prose_detected", False))
+            required.append("no_outside_prose")
 
     # Keep required order stable without duplicates.
     seen: set[str] = set()
@@ -1093,7 +1338,8 @@ def _load_model_for_evaluation(
 
 def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> int:
     eval_cfg = _read_eval_config(config)
-    evaluator_metadata = _build_evaluator_metadata(eval_cfg)
+    generation_profile = _build_generation_profile(eval_cfg)
+    evaluator_metadata = _build_evaluator_metadata(eval_cfg, generation_profile=generation_profile)
     eval_dir = root / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
     sample_outputs_dir = eval_dir / "sample_outputs"
@@ -1102,6 +1348,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
     manifest = Manifest("evaluation", eval_dir)
     manifest.data["config"] = eval_cfg
     manifest.data["evaluator"] = evaluator_metadata
+    manifest.data["generation_profile"] = generation_profile
 
     models_to_eval = _resolve_models_for_eval(config, eval_cfg)
     if not models_to_eval:
@@ -1190,6 +1437,13 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
 
         model_dir = sample_outputs_dir / _sanitize_slug(model_name)
         model_dir.mkdir(parents=True, exist_ok=True)
+        runtime_eval_cfg = dict(eval_cfg)
+        runtime_eval_cfg["_bad_words_ids"] = _build_bad_words_ids(
+            tokenizer, _string_list(eval_cfg.get("generation_blocklist_strings"), DEFAULT_GENERATION_BLOCKLIST_STRINGS)
+        )
+        runtime_eval_cfg["_compiled_stop_patterns"] = _compile_stop_patterns(
+            _string_list(eval_cfg.get("generation_stop_regex"), DEFAULT_GENERATION_STOP_REGEX)
+        )
 
         for variant in ["fine_tuned", "baseline"]:
             context = model.disable_adapter() if variant == "baseline" and hasattr(model, "disable_adapter") else nullcontext()
@@ -1201,17 +1455,25 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                     category = str(prompt.get("category", "general"))
 
                     logger.info(f"Generating {variant} output for {model_name}:{prompt_id}")
-                    output = _generate_response(
+                    raw_output = _generate_response(
                         model=model,
                         tokenizer=tokenizer,
                         instruction=instruction,
                         input_text=input_text,
-                        max_new_tokens=int(eval_cfg["max_new_tokens"]),
-                        eval_cfg=eval_cfg,
+                        max_new_tokens=int(runtime_eval_cfg["max_new_tokens"]),
+                        eval_cfg=runtime_eval_cfg,
                     )
+                    output, generation_guardrails = _truncate_on_generation_markers(raw_output, runtime_eval_cfg)
+                    contract_diagnostics = _contract_diagnostics(output)
 
-                    checks, required = _required_checks_for_prompt(prompt_id, output, prompt=prompt)
-                    external_checks = _run_external_checks(output, eval_cfg)
+                    checks, required = _required_checks_for_prompt(
+                        prompt_id,
+                        output,
+                        prompt=prompt,
+                        eval_cfg=runtime_eval_cfg,
+                        contract_diagnostics=contract_diagnostics,
+                    )
+                    external_checks = _run_external_checks(output, runtime_eval_cfg)
                     checks, required = _apply_external_required_checks(
                         prompt_id=prompt_id,
                         prompt=prompt,
@@ -1220,7 +1482,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         external_checks=external_checks,
                     )
                     format_sanity = _compute_format_sanity(output)
-                    artifact_guard = _artifact_guard(output)
+                    artifact_guard = _artifact_guard(output, generation_guardrails=generation_guardrails)
                     score = _score_result(checks, required, external_checks, artifact_guard=artifact_guard)
 
                     output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}.txt"
@@ -1242,6 +1504,8 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         "required_checks": required,
                         "external_checks": external_checks,
                         "format_sanity": format_sanity,
+                        "contract_diagnostics": contract_diagnostics,
+                        "generation_guardrails": generation_guardrails,
                         "artifact_guard": artifact_guard,
                     }
                     result.update(score)
@@ -1265,6 +1529,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
         "mode": eval_cfg.get("mode", "test_run"),
         "prompt_suite": prompt_suite,
         "evaluator": evaluator_metadata,
+        "generation_profile": generation_profile,
         "blocked_models": blocked_models,
         "summary": summary,
         "results": all_results,
@@ -1293,6 +1558,8 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
             "evaluator_logic_version": evaluator_metadata["logic_version"],
             "evaluator_logic_sha256": evaluator_metadata["logic_sha256"],
             "prompt_suite_sha256": evaluator_metadata["prompt_suite_sha256"],
+            "generation_profile_sha256": generation_profile["generation_profile_sha256"],
+            "artifact_blocklist_version": generation_profile["artifact_blocklist_version"],
             "blocked_models": len(blocked_models),
             "result_count": len(all_results),
         }
@@ -1312,7 +1579,9 @@ __all__ = [
     "run_evaluation_stage",
     "summarize_results",
     "_build_generation_kwargs",
+    "_contract_diagnostics",
     "_extract_code_blocks",
     "_required_checks_for_prompt",
     "_score_result",
+    "_truncate_on_generation_markers",
 ]

@@ -17,10 +17,16 @@ DECLARATION_RE = re.compile(r"\b(class|interface|trait|enum)\s+([A-Za-z_][A-Za-z
 NAMESPACE_RE = re.compile(r"^namespace\s+([^;]+);", re.MULTILINE)
 USE_RE = re.compile(r"^use\s+([^;]+);", re.MULTILINE)
 METHOD_RE = re.compile(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output)\s*:")
+PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output|response|assistant|user)\s*:")
+MALFORMED_WRAPPER_RE = re.compile(
+    r"(?im)(\[\s*/?inst\s*\]|^\s*###\s*(instruction|input|output|response)\s*:|<\|im_(start|end)\|>|<\|assistant\|>|<\|user\|>)"
+)
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
 SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
+FIM_MARKER_RE = re.compile(
+    r"(?i)(<\|fim_(prefix|middle|suffix|pad)\|>|<fim_(prefix|middle|suffix|pad)>|<\|file_sep\|>)"
+)
 CLASS_DECL_RE = re.compile(r"\bclass\s+[A-Za-z_][A-Za-z0-9_]*")
 FUNCTION_DECL_RE = re.compile(r"\bfunction\s+[A-Za-z_][A-Za-z0-9_]*\s*\(")
 REQUESTED_PATH_RE = re.compile(r"['\"](/[^'\"]+)['\"]")
@@ -77,10 +83,16 @@ def _has_predominantly_numeric_fenced_block(output: str) -> bool:
 def _has_special_token_artifact(output: str) -> bool:
     if SPECIAL_TOKEN_ARTIFACT_RE.search(output):
         return True
+    if FIM_MARKER_RE.search(output):
+        return True
     lower = output.lower()
     if "_closed_prs" in lower:
         return True
     return False
+
+
+def _has_prompt_wrapper_leakage(output: str) -> bool:
+    return bool(PROMPT_WRAPPER_RE.search(output) or MALFORMED_WRAPPER_RE.search(output))
 
 
 def _numeric_line_streak(output: str) -> int:
@@ -467,7 +479,7 @@ def _validate_sample(
         if kind in {"interface", "trait", "enum"}:
             return False, f"class_{kind}_mismatch"
 
-    if PROMPT_WRAPPER_RE.search(output):
+    if _has_prompt_wrapper_leakage(output):
         return False, "contains_prompt_wrapper_echo"
 
     artifact_reason = _artifact_rejection_reason(
@@ -1495,7 +1507,7 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
     }
     for sample in final_records:
         output = str(sample.get("output", ""))
-        if PROMPT_WRAPPER_RE.search(output):
+        if _has_prompt_wrapper_leakage(output):
             final_artifact_counts["prompt_wrapper_echo"] += 1
         artifact_reason = _artifact_rejection_reason(
             output,

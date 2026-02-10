@@ -1,6 +1,6 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-10T05:16:15Z",
+  "timestamp": "2026-02-10T06:00:21Z",
   "inputs": [
     {
       "name": "v1_train",
@@ -104,13 +104,37 @@
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
       "weak_categories": [
-        "routing"
+        "sdc",
+        "di",
+        "routing",
+        "attributes",
+        "twig"
       ],
       "details": [
         {
+          "category": "sdc",
+          "negative_prompt_count": 4,
+          "avg_delta": -0.72
+        },
+        {
+          "category": "di",
+          "negative_prompt_count": 6,
+          "avg_delta": -0.4949
+        },
+        {
           "category": "routing",
-          "negative_prompt_count": 1,
-          "avg_delta": -0.28
+          "negative_prompt_count": 7,
+          "avg_delta": -0.4824
+        },
+        {
+          "category": "attributes",
+          "negative_prompt_count": 6,
+          "avg_delta": -0.4191
+        },
+        {
+          "category": "twig",
+          "negative_prompt_count": 2,
+          "avg_delta": -0.2
         }
       ]
     },

@@ -209,6 +209,17 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         self.assertFalse(passed)
         self.assertEqual(reason, "contains_prompt_wrapper_echo")
 
+    def test_validate_rejects_malformed_wrapper_echo_in_output(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+            "input": "",
+            "output": "### Instruction: x\n### Response:\n<?php\nclass Example {}\n",
+            "metadata": {"source": "repos/example/src/Example.php"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "contains_prompt_wrapper_echo")
+
     def test_validate_rejects_numeric_line_streak_artifact(self):
         sample = {
             "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
@@ -219,6 +230,17 @@ class DatasetRefinementHelpersTest(unittest.TestCase):
         passed, reason = _validate_sample(sample)
         self.assertFalse(passed)
         self.assertEqual(reason, "numeric_line_streak_artifact")
+
+    def test_validate_rejects_plain_fim_artifact(self):
+        sample = {
+            "instruction": "Show me the implementation of the class Example in the file repos/example/src/Example.php.",
+            "input": "",
+            "output": "<?php\nclass Example {}\n<fim_middle>\n",
+            "metadata": {"source": "repos/example/src/Example.php"},
+        }
+        passed, reason = _validate_sample(sample)
+        self.assertFalse(passed)
+        self.assertEqual(reason, "special_token_artifact")
 
     def test_validate_rejects_repetitive_output_artifact(self):
         repeated_lines = ["same_line"] * 25

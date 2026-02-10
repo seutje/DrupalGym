@@ -9,6 +9,7 @@ from pipeline.evaluation import (
     _apply_external_required_checks,
     _artifact_guard,
     _build_generation_kwargs,
+    _contract_diagnostics,
     _compute_format_sanity,
     _extract_code_blocks,
     _load_model_for_evaluation,
@@ -18,6 +19,7 @@ from pipeline.evaluation import (
     _run_phpcs,
     _score_result,
     _select_snippets_for_checks,
+    _truncate_on_generation_markers,
     summarize_results,
 )
 
@@ -194,6 +196,59 @@ class EvaluationHelpersTest(unittest.TestCase):
         checks, required = _required_checks_for_prompt("custom_php_prompt", "<?php\nfinal class InlineOnly {}\n", prompt=prompt)
         self.assertIn("has_fenced_php_block", required)
         self.assertFalse(checks["has_fenced_php_block"])
+
+    def test_required_checks_strict_contract_dual_fence(self):
+        prompt = {
+            "requires_php": True,
+            "require_fenced_php": True,
+            "expected_fenced_blocks": 2,
+            "expected_fenced_languages": ["yaml", "php"],
+        }
+        output = "```yaml\nservices:\n  gym.foo: {}\n```\n```php\n<?php\nfinal class GymFoo {}\n```\n"
+        checks, required = _required_checks_for_prompt(
+            "service_di",
+            output,
+            prompt=prompt,
+            eval_cfg={"strict_contract_mode": True, "enforce_no_outside_prose_for_php_required": True},
+            contract_diagnostics=_contract_diagnostics(output),
+        )
+        self.assertIn("fenced_block_count", required)
+        self.assertIn("fenced_language_order", required)
+        self.assertIn("no_outside_prose", required)
+        self.assertTrue(checks["fenced_block_count"])
+        self.assertTrue(checks["fenced_language_order"])
+        self.assertTrue(checks["no_outside_prose"])
+
+    def test_required_checks_strict_contract_rejects_outside_prose(self):
+        prompt = {
+            "requires_php": True,
+            "require_fenced_php": True,
+            "expected_fenced_blocks": 1,
+            "expected_fenced_languages": ["php"],
+        }
+        output = "Here is your code:\n```php\n<?php\nfinal class GymFoo {}\n```\n"
+        checks, _required = _required_checks_for_prompt(
+            "block_attribute",
+            output,
+            prompt=prompt,
+            eval_cfg={"strict_contract_mode": True, "enforce_no_outside_prose_for_php_required": True},
+            contract_diagnostics=_contract_diagnostics(output),
+        )
+        self.assertFalse(checks["no_outside_prose"])
+
+    def test_truncate_on_generation_markers_detects_fim(self):
+        output = "valid\n<|fim_middle|>\ncorrupt"
+        trimmed, details = _truncate_on_generation_markers(
+            output,
+            {"apply_generation_stop_truncation": True, "generation_stop_regex": [r"<\\|fim_middle\\|>"]},
+        )
+        self.assertEqual(trimmed, "valid")
+        self.assertTrue(details["truncated_on_marker"])
+
+    def test_artifact_guard_marks_generation_stop_triggered(self):
+        guard = _artifact_guard("clean output", generation_guardrails={"truncated_on_marker": True})
+        self.assertFalse(guard["is_clean"])
+        self.assertIn("generation_stop_triggered_artifact", guard["reasons"])
 
     def test_apply_external_required_checks_requires_php_snippet_for_service_di(self):
         checks = {"non_empty_output": True}

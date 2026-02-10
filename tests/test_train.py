@@ -17,6 +17,9 @@ class _DummyLogger:
     def info(self, *_args, **_kwargs):
         return None
 
+    def error(self, *_args, **_kwargs):
+        return None
+
 
 class TrainHelpersTest(unittest.TestCase):
     def test_completion_labels_mask_prompt_tokens(self):
@@ -63,6 +66,62 @@ class TrainHelpersTest(unittest.TestCase):
                 "instruction": "Explain the following topic based on Drupal 11 documentation: Example",
                 "input": "",
                 "output": "Looks normal\n<|fim_suffix|>\nbut should fail\n",
+            }
+            good_sample = {
+                "instruction": "Explain the following topic based on Drupal 11 documentation: Routing",
+                "input": "",
+                "output": "Use routing.yml with controller class and proper permissions.",
+            }
+            with open(train_path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(bad_sample) + "\n")
+            with open(valid_path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(good_sample) + "\n")
+
+            ok = _audit_dataset_artifacts(
+                dataset_dir=root,
+                logger=_DummyLogger(),
+                max_numeric_line_streak=12,
+                max_repeated_line_ratio=0.15,
+            )
+            self.assertFalse(ok)
+
+    def test_dataset_artifact_audit_detects_plain_fim_artifact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            train_path = root / "train.jsonl"
+            valid_path = root / "valid.jsonl"
+            bad_sample = {
+                "instruction": "Explain the following topic based on Drupal 11 documentation: Example",
+                "input": "",
+                "output": "Looks normal\n<fim_middle>\nbut should fail\n",
+            }
+            good_sample = {
+                "instruction": "Explain the following topic based on Drupal 11 documentation: Routing",
+                "input": "",
+                "output": "Use routing.yml with controller class and proper permissions.",
+            }
+            with open(train_path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(bad_sample) + "\n")
+            with open(valid_path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(good_sample) + "\n")
+
+            ok = _audit_dataset_artifacts(
+                dataset_dir=root,
+                logger=_DummyLogger(),
+                max_numeric_line_streak=12,
+                max_repeated_line_ratio=0.15,
+            )
+            self.assertFalse(ok)
+
+    def test_dataset_artifact_audit_detects_wrapper_echo(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            train_path = root / "train.jsonl"
+            valid_path = root / "valid.jsonl"
+            bad_sample = {
+                "instruction": "Explain the following topic based on Drupal 11 documentation: Example",
+                "input": "",
+                "output": "### Instruction: bad\n### Response:\nexample\n",
             }
             good_sample = {
                 "instruction": "Explain the following topic based on Drupal 11 documentation: Routing",

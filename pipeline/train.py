@@ -58,6 +58,13 @@ from .logger import PipelineLogger
 NUMERIC_LINE_RE = re.compile(r"^\d{1,5}(?:[.):])?$")
 FENCED_BLOCK_RE = re.compile(r"```(?:[A-Za-z0-9_+-]+)?\n(.*?)```", re.DOTALL)
 SPECIAL_TOKEN_ARTIFACT_RE = re.compile(r"<\|[^|\n]{1,100}\|>")
+FIM_MARKER_RE = re.compile(
+    r"(?i)(<\|fim_(prefix|middle|suffix|pad)\|>|<fim_(prefix|middle|suffix|pad)>|<\|file_sep\|>)"
+)
+PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output|response|assistant|user)\s*:")
+MALFORMED_WRAPPER_RE = re.compile(
+    r"(?im)(\[\s*/?inst\s*\]|^\s*###\s*(instruction|input|output|response)\s*:|<\|im_(start|end)\|>|<\|assistant\|>|<\|user\|>)"
+)
 OUTPUT_MARKER = "Output:"
 
 def _resolve_dtype(dtype_name: str):
@@ -151,7 +158,33 @@ def _has_predominantly_numeric_fenced_block(output: str) -> bool:
 def _has_special_token_artifact(output: str) -> bool:
     if SPECIAL_TOKEN_ARTIFACT_RE.search(output):
         return True
+    if FIM_MARKER_RE.search(output):
+        return True
     return "_closed_prs" in output.lower()
+
+
+def _has_prompt_wrapper_leakage(output: str) -> bool:
+    return bool(PROMPT_WRAPPER_RE.search(output) or MALFORMED_WRAPPER_RE.search(output))
+
+
+def _artifact_failure_reasons(
+    output: str,
+    *,
+    max_numeric_line_streak: int,
+    max_repeated_line_ratio: float,
+) -> list[str]:
+    reasons: list[str] = []
+    if _has_prompt_wrapper_leakage(output):
+        reasons.append("prompt_wrapper_echo")
+    if _numeric_line_streak(output) > max_numeric_line_streak:
+        reasons.append("numeric_line_streak")
+    if _repeated_line_ratio(output) > max_repeated_line_ratio:
+        reasons.append("repetitive_output")
+    if _has_predominantly_numeric_fenced_block(output):
+        reasons.append("numeric_code_block_artifact")
+    if _has_special_token_artifact(output):
+        reasons.append("special_token_artifact")
+    return reasons
 
 
 def _numeric_line_streak(output: str) -> int:
@@ -188,43 +221,51 @@ def _audit_dataset_artifacts(
         "checked_samples": 0,
         "failed_samples": 0,
         "reasons": {
+            "prompt_wrapper_echo": 0,
             "numeric_line_streak": 0,
             "repetitive_output": 0,
             "numeric_code_block_artifact": 0,
             "special_token_artifact": 0,
         },
     }
+    failing_examples: list[dict[str, Any]] = []
 
     for split_name in split_names:
         split_path = dataset_dir / f"{split_name}.jsonl"
         if not split_path.exists():
             continue
         with open(split_path, "r", encoding="utf-8") as handle:
-            for line in handle:
+            for line_number, line in enumerate(handle, start=1):
                 line = line.strip()
                 if not line:
                     continue
                 sample = json.loads(line)
                 output = str(sample.get("output", ""))
                 summary["checked_samples"] += 1
-                failed = False
-
-                if _numeric_line_streak(output) > max_numeric_line_streak:
-                    summary["reasons"]["numeric_line_streak"] += 1
-                    failed = True
-                if _repeated_line_ratio(output) > max_repeated_line_ratio:
-                    summary["reasons"]["repetitive_output"] += 1
-                    failed = True
-                if _has_predominantly_numeric_fenced_block(output):
-                    summary["reasons"]["numeric_code_block_artifact"] += 1
-                    failed = True
-                if _has_special_token_artifact(output):
-                    summary["reasons"]["special_token_artifact"] += 1
-                    failed = True
-
-                if failed:
+                reasons = _artifact_failure_reasons(
+                    output,
+                    max_numeric_line_streak=max_numeric_line_streak,
+                    max_repeated_line_ratio=max_repeated_line_ratio,
+                )
+                for reason in reasons:
+                    summary["reasons"][reason] = summary["reasons"].get(reason, 0) + 1
+                if reasons:
                     summary["failed_samples"] += 1
+                    if len(failing_examples) < 20:
+                        failing_examples.append(
+                            {
+                                "split": split_name,
+                                "line": line_number,
+                                "reason": ",".join(reasons),
+                            }
+                        )
 
+    if summary["failed_samples"] > 0:
+        logger.error(
+            "Dataset artifact audit failed.",
+            failed_samples=summary["failed_samples"],
+            failing_examples=failing_examples,
+        )
     logger.info("Dataset artifact audit completed.", **summary)
     return summary["failed_samples"] == 0
 

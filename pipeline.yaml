@@ -367,11 +367,11 @@ training:
     max_seq_len: 2048
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
-    max_steps: 450
+    max_steps: 250
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
     gradient_accumulation_steps: 16
-    learning_rate: 0.0002
+    learning_rate: 0.0001
     logging_steps: 5
     eval_strategy: "steps"
     eval_steps: 50
@@ -430,7 +430,7 @@ training:
 
 evaluation:
   seed: 42
-  mode: "full_scale"
+  mode: "test_run"
   max_new_tokens: 512
   device: "auto"
   max_models: 1
@@ -442,6 +442,34 @@ evaluation:
   php_snippet_policy: "php_only" # "php_only" (default) or "all_fences" for legacy behavior
   repetition_penalty: 1.1
   no_repeat_ngram_size: 4
+  apply_generation_stop_truncation: true
+  strict_contract_mode: true
+  enforce_no_outside_prose_for_php_required: true
+  generation_blocklist_strings:
+    - "<|fim_prefix|>"
+    - "<|fim_middle|>"
+    - "<|fim_suffix|>"
+    - "<|fim_pad|>"
+    - "<fim_prefix>"
+    - "<fim_middle>"
+    - "<fim_suffix>"
+    - "<fim_pad>"
+    - "<|file_sep|>"
+    - "<|im_start|>"
+    - "<|im_end|>"
+    - "<|assistant|>"
+    - "<|user|>"
+    - "### Instruction:"
+    - "### Response:"
+  generation_stop_regex:
+    - "<\\|fim_(prefix|middle|suffix|pad)\\|>"
+    - "<fim_(prefix|middle|suffix|pad)>"
+    - "<\\|file_sep\\|>"
+    - "<\\|im_(start|end)\\|>"
+    - "<\\|assistant\\|>"
+    - "<\\|user\\|>"
+    - "(?m)^\\s*(instruction|input|output|response)\\s*:"
+    - "(?m)^\\s*###\\s*(instruction|input|output|response)\\s*:"
   prompt_suite:
     # 40 prompts total: 20 PHP-required and 20 non-PHP-required.
     - id: "block_attribute"
@@ -450,6 +478,8 @@ evaluation:
       input: ""
       requires_php: true
       require_fenced_php: true
+      expected_fenced_blocks: 1
+      expected_fenced_languages: ["php"]
       required_substrings: ["#[Block", "gym_stats", "gym statistics"]
     - id: "field_type_attribute"
       category: "attributes"
@@ -507,6 +537,8 @@ evaluation:
       input: ""
       requires_php: true
       require_fenced_php: true
+      expected_fenced_blocks: 2
+      expected_fenced_languages: ["yaml", "php"]
       required_substrings: ["services:", "logger.factory", "__construct("]
       required_regex: ['```yaml[\s\S]*```[\s\S]*```php']
     - id: "service_factory_di"
@@ -563,6 +595,8 @@ evaluation:
       input: ""
       requires_php: true
       require_fenced_php: true
+      expected_fenced_blocks: 2
+      expected_fenced_languages: ["yaml", "php"]
       required_substrings: ["/gym/stats", "_controller", "class"]
       required_regex: ['```yaml[\s\S]*```[\s\S]*```php']
     - id: "routing_access_service"
