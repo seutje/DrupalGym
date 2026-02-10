@@ -1,6 +1,6 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-10T06:00:21Z",
+  "timestamp": "2026-02-10T16:19:35Z",
   "inputs": [
     {
       "name": "v1_train",
@@ -21,19 +21,19 @@
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "660e3c4cc894fa44238605e93f2a413b312fd9c7322c799a804144e4f6559720"
+      "hash": "c42302531138b6856a211441bf80faeaddc3b657f7306704dfbde61c5438c914"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "ac90f1fc073613ec812e4b37b45ce582075466dc937d8a41d2e25ec15f7b6012"
+      "hash": "790c33f372158ab6ceeebf1e20112288d06c174fa1ad34c2fbd80c398aea4620"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "1490d90438db408cd2a21a56ef88aecafb4e1b6c644e088f1f79662a22b32774"
+      "hash": "0eb956858e653dc27194dc7bd6711d8d718f94f1148817df1ccbebdf553603d3"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "6d3c58f8919b93a24d33fe23fd30b631b1ad970e0d8a7f3d905e540914ab7497"
+      "hash": "a70be89a18b9816865242840b76debe4ef3046b15756093e247045a1743c3b9e"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
@@ -49,7 +49,7 @@
     },
     "quality_scorecard": {
       "path": "dataset/v2/quality_scorecard.json",
-      "hash": "739c774a3526cb61a5ca8141b9fa475f89d3975076be068f295e61eed57a2f6b"
+      "hash": "196b37d317fc43c564800660dad2a60e4e4bdce9488e9c7b082084e8a1a526ad"
     }
   },
   "metrics": {
@@ -66,24 +66,27 @@
     "normalized_output_dedup_dropped": 1385,
     "normalized_output_duplicate_ratio_before_dedup": 0.1469,
     "normalized_output_duplicate_ratio": 0.0,
+    "retrieval_share": 0.4094,
+    "instruction_share": 0.5906,
+    "contract_instruction_share": 0.35,
+    "fenced_output_share": 0.35,
     "ambiguous_pairs": 0,
     "ambiguous_samples": 0,
     "ambiguous_pair_ratio": 0.0,
     "empty_input_share_by_type": {
       "code_reference": 0.0,
       "yaml_reference": 0.0,
-      "refactor": 0.0,
       "twig_reference": 0.0,
-      "doc_summary": 0.0,
-      "sdc_reference": 0.0
+      "sdc_reference": 0.0,
+      "refactor": 0.0
     },
     "source_share_cap_dropped": 0,
-    "final_total": 8042,
+    "final_total": 7674,
     "test_ratio_before_rebalance": 0.6003,
     "test_ratio_after_rebalance": 0.4499,
-    "split_train": 6431,
-    "split_valid": 804,
-    "split_test": 807,
+    "split_train": 6137,
+    "split_valid": 769,
+    "split_test": 768,
     "eval_candidate_pool_size": 0,
     "exclude_test_sources_from_training_pool": false,
     "exclude_sources_prefixes": [
@@ -98,45 +101,55 @@
       "after_test_pool_extraction": 7581,
       "after_augmentation": 9427,
       "after_normalized_output_dedup": 8042,
-      "after_source_share_cap": 8042,
-      "rejected_records": 5653
+      "after_source_share_cap": 7674,
+      "rejected_records": 6021
     },
     "feedback_targets": {
       "source": "/home/seutje/projects/DrupalGym/eval/metrics.json",
       "weak_categories": [
-        "sdc",
-        "di",
-        "routing",
+        "twig",
         "attributes",
-        "twig"
+        "di",
+        "sdc",
+        "routing"
       ],
       "details": [
         {
-          "category": "sdc",
-          "negative_prompt_count": 4,
-          "avg_delta": -0.72
-        },
-        {
-          "category": "di",
-          "negative_prompt_count": 6,
-          "avg_delta": -0.4949
-        },
-        {
-          "category": "routing",
-          "negative_prompt_count": 7,
-          "avg_delta": -0.4824
+          "category": "twig",
+          "negative_prompt_count": 3,
+          "avg_delta": -0.5867
         },
         {
           "category": "attributes",
-          "negative_prompt_count": 6,
-          "avg_delta": -0.4191
+          "negative_prompt_count": 7,
+          "avg_delta": -0.3772
         },
         {
-          "category": "twig",
-          "negative_prompt_count": 2,
-          "avg_delta": -0.2
+          "category": "di",
+          "negative_prompt_count": 7,
+          "avg_delta": -0.3101
+        },
+        {
+          "category": "sdc",
+          "negative_prompt_count": 3,
+          "avg_delta": -0.2667
+        },
+        {
+          "category": "routing",
+          "negative_prompt_count": 6,
+          "avg_delta": -0.2455
         }
       ]
+    },
+    "format_alignment": {
+      "enabled": true,
+      "converted_to_contract": 2687,
+      "dropped_explain_topic": 367,
+      "dropped_retrieval": 0,
+      "retrieval_share": 0.4094,
+      "instruction_share": 0.5906,
+      "contract_instruction_share": 0.3501,
+      "fenced_output_share": 0.3501
     },
     "rejection_reasons": {
       "missing_drupal11_attribute_or_di_pattern": 1368,
@@ -148,87 +161,90 @@
       "test_rebalance_drop": 2852,
       "augmentation_non_php_source": 2324,
       "augmentation_from_test_source": 3411,
-      "normalized_output_dedupe_drop": 1385
+      "normalized_output_dedupe_drop": 1385,
+      "format_alignment_drop_explain_topic": 367,
+      "repetitive_output_artifact": 1
     },
     "sample_type_distribution": {
-      "retrieval": 6196,
+      "contract_instruction": 2686,
+      "retrieval": 3142,
       "refactor": 462,
       "bugfix": 462,
-      "write_from_spec": 461,
-      "explain_and_implement": 461
+      "explain_and_implement": 461,
+      "write_from_spec": 461
     },
     "clean_pool_size": 7581,
     "experimental_pool_size": 1846,
     "source_concentration_top10": [
       {
         "source_prefix": "repos/drupal_core",
-        "count": 6687,
-        "share": 0.8315
+        "count": 6644,
+        "share": 0.8658
       },
       {
         "source_prefix": "repos/display_builder",
-        "count": 352,
-        "share": 0.0438
-      },
-      {
-        "source_prefix": "docs/www_drupal_org",
-        "count": 240,
-        "share": 0.0298
+        "count": 351,
+        "share": 0.0457
       },
       {
         "source_prefix": "repos/drupal_ui_patterns",
         "count": 217,
-        "share": 0.027
-      },
-      {
-        "source_prefix": "docs/api_drupal_org",
-        "count": 126,
-        "share": 0.0157
+        "share": 0.0283
       },
       {
         "source_prefix": "repos/eb",
         "count": 88,
-        "share": 0.0109
+        "share": 0.0115
       },
       {
         "source_prefix": "repos/webprofiler",
         "count": 65,
-        "share": 0.0081
+        "share": 0.0085
       },
       {
         "source_prefix": "repos/drupal_sdc_examples",
         "count": 60,
-        "share": 0.0075
+        "share": 0.0078
       },
       {
         "source_prefix": "repos/drupal_gin_theme",
         "count": 48,
-        "share": 0.006
+        "share": 0.0063
+      },
+      {
+        "source_prefix": "docs/www_drupal_org",
+        "count": 42,
+        "share": 0.0055
       },
       {
         "source_prefix": "repos/pinto_layout",
         "count": 28,
-        "share": 0.0035
+        "share": 0.0036
+      },
+      {
+        "source_prefix": "repos/drupal_component_library",
+        "count": 25,
+        "share": 0.0033
       }
     ],
     "weak_category_coverage": {
-      "attributes": 3307,
-      "di": 810,
-      "routing": 358,
-      "sdc": 284,
-      "twig": 745
+      "attributes": 3293,
+      "di": 805,
+      "routing": 365,
+      "sdc": 292,
+      "twig": 758
     },
     "strict_weak_category_coverage": {
-      "attributes": 3307,
-      "di": 810,
-      "routing": 358,
-      "sdc": 284,
-      "twig": 745
+      "attributes": 3293,
+      "di": 805,
+      "routing": 365,
+      "sdc": 292,
+      "twig": 758
     },
     "train_output_percentiles": {
-      "p50": 1580,
+      "p50": 1661,
       "p90": 6000,
-      "p95": 6000,
+      "p95": 6011,
       "p99": 6167
     },
     "quality_scorecard": {
@@ -240,6 +256,9 @@
         "train_output_p95_max": 9000,
         "ambiguous_pair_ratio_max": 0.01,
         "normalized_output_duplicate_ratio_max": 0.01,
+        "fenced_output_share_min": 0.35,
+        "contract_instruction_share_min": 0.35,
+        "retrieval_share_max": 0.6,
         "empty_input_share_max_by_type": {
           "code_reference": 0.01,
           "sdc_reference": 0.01,
@@ -258,18 +277,21 @@
       "metrics": {
         "malformed_instruction_class_slot": 0,
         "yaml_too_short_share": 0.0018,
-        "drupal_core_train_share": 0.8315,
-        "train_output_p95": 6000,
+        "drupal_core_train_share": 0.8658,
+        "train_output_p95": 6011,
         "ambiguous_pair_ratio": 0.0,
         "normalized_output_duplicate_ratio": 0.0,
         "empty_input_share_by_type": {
           "code_reference": 0.0,
           "yaml_reference": 0.0,
-          "refactor": 0.0,
           "twig_reference": 0.0,
-          "doc_summary": 0.0,
-          "sdc_reference": 0.0
+          "sdc_reference": 0.0,
+          "refactor": 0.0
         },
+        "retrieval_share": 0.4094,
+        "instruction_share": 0.5906,
+        "contract_instruction_share": 0.35,
+        "fenced_output_share": 0.35,
         "final_artifact_counts": {
           "prompt_wrapper_echo": 0,
           "special_token_artifact": 0,
@@ -278,18 +300,28 @@
           "numeric_code_block_artifact": 0
         },
         "weak_category_coverage": {
-          "attributes": 3307,
-          "di": 810,
-          "routing": 358,
-          "sdc": 284,
-          "twig": 745
+          "attributes": 3293,
+          "di": 805,
+          "routing": 365,
+          "sdc": 292,
+          "twig": 758
         },
         "strict_weak_category_coverage": {
-          "attributes": 3307,
-          "di": 810,
-          "routing": 358,
-          "sdc": 284,
-          "twig": 745
+          "attributes": 3293,
+          "di": 805,
+          "routing": 365,
+          "sdc": 292,
+          "twig": 758
+        },
+        "format_alignment": {
+          "enabled": true,
+          "converted_to_contract": 2687,
+          "dropped_explain_topic": 367,
+          "dropped_retrieval": 0,
+          "retrieval_share": 0.4094,
+          "instruction_share": 0.5906,
+          "contract_instruction_share": 0.3501,
+          "fenced_output_share": 0.3501
         }
       },
       "checks": {
@@ -299,6 +331,9 @@
         "train_output_p95": true,
         "ambiguous_pair_ratio": true,
         "normalized_output_duplicate_ratio": true,
+        "fenced_output_share": true,
+        "contract_instruction_share": true,
+        "retrieval_share": true,
         "empty_input_share_by_type": true,
         "final_artifact_counts": true,
         "weak_category_coverage": true
@@ -314,8 +349,28 @@
     "max_output_chars": 6000,
     "max_repeated_line_ratio": 0.31,
     "max_source_share": 0.9,
+    "fenced_output_share_min": 0.35,
+    "contract_instruction_share_min": 0.35,
+    "retrieval_share_max": 0.6,
     "deduplicate_normalized_output": true,
     "duplicate_resolution": "prefer_augmented_drop_retrieval",
+    "format_alignment": {
+      "enabled": true,
+      "mix_retrieval_share": 0.6,
+      "mix_instruction_share": 0.4,
+      "drop_explain_topic_prompts": true,
+      "allowed_languages": [
+        "php",
+        "yaml",
+        "twig",
+        "text"
+      ],
+      "fence_required_for_languages": [
+        "php",
+        "yaml",
+        "twig"
+      ]
+    },
     "require_context_for_types": [
       "yaml_reference",
       "twig_reference",

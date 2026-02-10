@@ -1,6 +1,7 @@
 import unittest
 
 from pipeline.dataset_refinement import (
+    _apply_format_alignment,
     _build_augmented_sample,
     _char_chunk_sample,
     _chunk_sample,
@@ -17,6 +18,80 @@ from pipeline.dataset_refinement import (
 
 
 class DatasetRefinementHelpersTest(unittest.TestCase):
+    def test_apply_format_alignment_enforces_retrieval_mix_and_contract_share(self):
+        samples = []
+        for idx in range(8):
+            samples.append(
+                {
+                    "instruction": "Show me the implementation of the class Example in the file <source_file>.",
+                    "input": "Source file: <source_file>",
+                    "output": "<?php\nfinal class Example {}\n",
+                    "metadata": {"source": f"repos/example/src/Example{idx}.php", "sample_type": "retrieval"},
+                }
+            )
+        for idx in range(2):
+            samples.append(
+                {
+                    "instruction": "Fix this broken Drupal 11 class implementation and return corrected PHP code.",
+                    "input": "Source file: <source_file>",
+                    "output": "<?php\nfinal class FixedExample {}\n",
+                    "metadata": {"source": f"repos/example/src/Fix{idx}.php", "sample_type": "bugfix"},
+                }
+            )
+
+        aligned, summary = _apply_format_alignment(
+            samples,
+            format_cfg={
+                "enabled": True,
+                "mix_retrieval_share": 0.60,
+                "mix_instruction_share": 0.40,
+                "drop_explain_topic_prompts": True,
+                "allowed_languages": ["php", "yaml", "twig", "text"],
+                "fence_required_for_languages": ["php", "yaml", "twig"],
+            },
+            seed=42,
+            contract_instruction_share_min=0.35,
+        )
+        self.assertEqual(len(aligned) + len(summary["dropped_samples"]), len(samples))
+        self.assertLessEqual(summary["retrieval_share"], 0.60)
+        self.assertGreaterEqual(summary["contract_instruction_share"], 0.35)
+        self.assertGreater(summary["converted_to_contract"], 0)
+        self.assertGreater(summary["fenced_output_share"], 0.0)
+
+    def test_apply_format_alignment_drops_explain_topic_retrieval(self):
+        samples = [
+            {
+                "instruction": "Explain the following topic based on Drupal 11 documentation: Services",
+                "input": "Source file: <source_file>",
+                "output": "services:\n  gym.foo: {}\n",
+                "metadata": {"source": "docs/www_drupal_org/services.md", "sample_type": "retrieval"},
+            },
+            {
+                "instruction": "Show me the implementation of the class Example in the file <source_file>.",
+                "input": "Source file: <source_file>",
+                "output": "<?php\nfinal class Example {}\n",
+                "metadata": {"source": "repos/example/src/Example.php", "sample_type": "retrieval"},
+            },
+        ]
+
+        aligned, summary = _apply_format_alignment(
+            samples,
+            format_cfg={
+                "enabled": True,
+                "mix_retrieval_share": 1.0,
+                "mix_instruction_share": 0.0,
+                "drop_explain_topic_prompts": True,
+                "allowed_languages": ["php", "yaml", "twig", "text"],
+                "fence_required_for_languages": ["php", "yaml", "twig"],
+            },
+            seed=7,
+            contract_instruction_share_min=0.0,
+        )
+        self.assertEqual(len(aligned), 1)
+        self.assertEqual(summary["dropped_explain_topic"], 1)
+        reasons = {item.get("rejection_reason") for item in summary["dropped_samples"]}
+        self.assertIn("format_alignment_drop_explain_topic", reasons)
+
     def test_validate_rejects_invalid_symbol_kind_prompt(self):
         sample = {
             "instruction": "Show me the implementation of the class is in the file repos/drupal_core/core/lib/Drupal/Foo.php.",

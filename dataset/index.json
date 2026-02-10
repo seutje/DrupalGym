@@ -1,6 +1,6 @@
 {
   "v1": {
-    "timestamp": "2026-02-10T06:00:19Z",
+    "timestamp": "2026-02-10T16:18:14Z",
     "metrics": {
       "train": 9479,
       "valid": 1184,
@@ -10,13 +10,13 @@
     "path": "dataset/v1"
   },
   "v2": {
-    "timestamp": "2026-02-10T06:00:21Z",
+    "timestamp": "2026-02-10T16:19:35Z",
     "stage": "dataset_refinement",
     "metrics": {
-      "train": 6431,
-      "valid": 804,
-      "test": 807,
-      "total": 8042
+      "train": 6137,
+      "valid": 769,
+      "test": 768,
+      "total": 7674
     },
     "path": "dataset/v2"
   }

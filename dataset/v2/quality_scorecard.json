@@ -7,6 +7,9 @@
     "train_output_p95_max": 9000,
     "ambiguous_pair_ratio_max": 0.01,
     "normalized_output_duplicate_ratio_max": 0.01,
+    "fenced_output_share_min": 0.35,
+    "contract_instruction_share_min": 0.35,
+    "retrieval_share_max": 0.6,
     "empty_input_share_max_by_type": {
       "code_reference": 0.01,
       "sdc_reference": 0.01,
@@ -25,18 +28,21 @@
   "metrics": {
     "malformed_instruction_class_slot": 0,
     "yaml_too_short_share": 0.0018,
-    "drupal_core_train_share": 0.8315,
-    "train_output_p95": 6000,
+    "drupal_core_train_share": 0.8658,
+    "train_output_p95": 6011,
     "ambiguous_pair_ratio": 0.0,
     "normalized_output_duplicate_ratio": 0.0,
     "empty_input_share_by_type": {
       "code_reference": 0.0,
       "yaml_reference": 0.0,
-      "refactor": 0.0,
       "twig_reference": 0.0,
-      "doc_summary": 0.0,
-      "sdc_reference": 0.0
+      "sdc_reference": 0.0,
+      "refactor": 0.0
     },
+    "retrieval_share": 0.4094,
+    "instruction_share": 0.5906,
+    "contract_instruction_share": 0.35,
+    "fenced_output_share": 0.35,
     "final_artifact_counts": {
       "prompt_wrapper_echo": 0,
       "special_token_artifact": 0,
@@ -45,18 +51,28 @@
       "numeric_code_block_artifact": 0
     },
     "weak_category_coverage": {
-      "attributes": 3307,
-      "di": 810,
-      "routing": 358,
-      "sdc": 284,
-      "twig": 745
+      "attributes": 3293,
+      "di": 805,
+      "routing": 365,
+      "sdc": 292,
+      "twig": 758
     },
     "strict_weak_category_coverage": {
-      "attributes": 3307,
-      "di": 810,
-      "routing": 358,
-      "sdc": 284,
-      "twig": 745
+      "attributes": 3293,
+      "di": 805,
+      "routing": 365,
+      "sdc": 292,
+      "twig": 758
+    },
+    "format_alignment": {
+      "enabled": true,
+      "converted_to_contract": 2687,
+      "dropped_explain_topic": 367,
+      "dropped_retrieval": 0,
+      "retrieval_share": 0.4094,
+      "instruction_share": 0.5906,
+      "contract_instruction_share": 0.3501,
+      "fenced_output_share": 0.3501
     }
   },
   "checks": {
@@ -66,6 +82,9 @@
     "train_output_p95": true,
     "ambiguous_pair_ratio": true,
     "normalized_output_duplicate_ratio": true,
+    "fenced_output_share": true,
+    "contract_instruction_share": true,
+    "retrieval_share": true,
     "empty_input_share_by_type": true,
     "final_artifact_counts": true,
     "weak_category_coverage": true

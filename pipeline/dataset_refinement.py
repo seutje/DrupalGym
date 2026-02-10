@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import math
 import random
 import re
 from pathlib import Path
@@ -210,6 +211,243 @@ def _output_hash(sample: dict[str, Any], normalized: bool = True) -> str:
     output = str(sample.get("output", ""))
     payload = _normalize_output_for_hash(output) if normalized else output
     return hashlib.sha256(payload.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _has_any_fenced_block(output: str) -> bool:
+    return bool(FENCED_BLOCK_RE.search(output))
+
+
+def _is_explain_topic_prompt(sample: dict[str, Any]) -> bool:
+    instruction = str(sample.get("instruction", "")).strip().lower()
+    return instruction.startswith("explain the following topic based on drupal 11 documentation:")
+
+
+def _looks_like_yaml(output: str) -> bool:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return False
+    sample = lines[:30]
+    yaml_like = 0
+    for line in sample:
+        if line.startswith("#"):
+            continue
+        if ":" in line and not line.startswith("<?php"):
+            yaml_like += 1
+    threshold = max(1, len(sample) // 3)
+    return yaml_like >= threshold
+
+
+def _detect_contract_language(sample: dict[str, Any], allowed_languages: set[str]) -> str:
+    output = str(sample.get("output", ""))
+    source = _sample_source(sample).lower()
+    output_lstrip = output.lstrip()
+    if output_lstrip.startswith("<?php") or source.endswith((".php", ".module", ".inc", ".install", ".theme")):
+        return "php" if "php" in allowed_languages else "text"
+    if source.endswith((".twig", ".html.twig")) or "{{" in output or "{%" in output:
+        return "twig" if "twig" in allowed_languages else "text"
+    if source.endswith((".yml", ".yaml")) or _looks_like_yaml(output):
+        return "yaml" if "yaml" in allowed_languages else "text"
+    return "text"
+
+
+def _build_contract_instruction_sample(
+    sample: dict[str, Any],
+    *,
+    language: str,
+    fence_required_languages: set[str],
+) -> dict[str, Any]:
+    record = copy.deepcopy(sample)
+    output = str(record.get("output", "")).strip()
+    source_file = Path(_sample_source(record)).name or "source.txt"
+
+    if language == "php":
+        record["instruction"] = (
+            "Provide a Drupal 11 and PHP 8.3 compliant implementation. "
+            "Return one fenced php block only."
+        )
+    elif language == "yaml":
+        record["instruction"] = "Provide Drupal 11 YAML only. Return one fenced yaml block only."
+    elif language == "twig":
+        record["instruction"] = "Provide Drupal 11 Twig only. Return one fenced twig block only."
+    else:
+        record["instruction"] = "Provide the requested implementation only."
+
+    base_input = str(record.get("input", "")).strip()
+    source_hint = f"Source file: {SOURCE_FILE_PLACEHOLDER}\nFile name hint: {source_file}"
+    if SOURCE_FILE_PLACEHOLDER not in base_input:
+        record["input"] = f"{source_hint}\n{base_input}".strip() if base_input else source_hint
+    else:
+        record["input"] = base_input
+
+    should_fence = language in fence_required_languages or language == "text"
+    if should_fence and not _has_any_fenced_block(output):
+        record["output"] = f"```{language}\n{output}\n```" if output else f"```{language}\n```"
+    else:
+        record["output"] = output
+
+    metadata = dict(record.get("metadata", {}))
+    refinement = dict(metadata.get("refinement", {}))
+    refinement["format_alignment"] = {"language": language, "converted_to_contract": True}
+    metadata["refinement"] = refinement
+    metadata["sample_type"] = "contract_instruction"
+    record["metadata"] = metadata
+    return record
+
+
+def _required_retrieval_drop_for_share(retrieval_count: int, total: int, max_share: float) -> int:
+    if total <= 0:
+        return 0
+    if max_share <= 0:
+        return retrieval_count
+    if max_share >= 1:
+        return 0
+    if (retrieval_count / total) <= max_share:
+        return 0
+    needed = (retrieval_count - (max_share * total)) / (1.0 - max_share)
+    return max(0, int(math.ceil(needed)))
+
+
+def _required_drop_for_fixed_numerator_share(numerator: int, total: int, min_share: float) -> int:
+    if total <= 0:
+        return 0
+    if min_share <= 0:
+        return 0
+    if min_share >= 1:
+        return total
+    if (numerator / total) >= min_share:
+        return 0
+    needed = total - (numerator / min_share)
+    return max(0, int(math.ceil(needed)))
+
+
+def _apply_format_alignment(
+    samples: list[dict[str, Any]],
+    *,
+    format_cfg: dict[str, Any],
+    seed: int,
+    contract_instruction_share_min: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    enabled = bool(format_cfg.get("enabled", False))
+    if not enabled:
+        total = len(samples)
+        retrieval = sum(1 for sample in samples if _sample_type(sample) == "retrieval")
+        contract = sum(1 for sample in samples if _sample_type(sample) == "contract_instruction")
+        fenced = sum(1 for sample in samples if _has_any_fenced_block(str(sample.get("output", ""))))
+        return samples, {
+            "enabled": False,
+            "converted_to_contract": 0,
+            "dropped_explain_topic": 0,
+            "dropped_retrieval": 0,
+            "retrieval_share": round(retrieval / total, 4) if total else 0.0,
+            "instruction_share": round((total - retrieval) / total, 4) if total else 0.0,
+            "contract_instruction_share": round(contract / total, 4) if total else 0.0,
+            "fenced_output_share": round(fenced / total, 4) if total else 0.0,
+            "dropped_samples": [],
+        }
+
+    rng = random.Random(seed)
+    mix_retrieval_share = max(0.0, min(1.0, float(format_cfg.get("mix_retrieval_share", 0.60))))
+    mix_instruction_share = max(0.0, min(1.0, float(format_cfg.get("mix_instruction_share", 0.40))))
+    allowed_languages = {
+        str(language).strip().lower()
+        for language in format_cfg.get("allowed_languages", ["php", "yaml", "twig", "text"])
+        if str(language).strip()
+    }
+    if not allowed_languages:
+        allowed_languages = {"php", "yaml", "twig", "text"}
+    fence_required_languages = {
+        str(language).strip().lower()
+        for language in format_cfg.get("fence_required_for_languages", ["php", "yaml", "twig"])
+        if str(language).strip()
+    }
+    drop_explain_topic_prompts = bool(format_cfg.get("drop_explain_topic_prompts", True))
+
+    working = list(samples)
+    dropped_samples: list[dict[str, Any]] = []
+    if drop_explain_topic_prompts:
+        retained: list[dict[str, Any]] = []
+        for sample in working:
+            if _sample_type(sample) == "retrieval" and _is_explain_topic_prompt(sample):
+                dropped = copy.deepcopy(sample)
+                dropped["rejection_reason"] = "format_alignment_drop_explain_topic"
+                dropped_samples.append(dropped)
+                continue
+            retained.append(sample)
+        working = retained
+
+    total = len(working)
+    retrieval_count = sum(1 for sample in working if _sample_type(sample) == "retrieval")
+    instruction_count = total - retrieval_count
+    contract_count = sum(1 for sample in working if _sample_type(sample) == "contract_instruction")
+
+    needed_for_retrieval = max(0, int(math.ceil(retrieval_count - (mix_retrieval_share * total))))
+    needed_for_instruction = max(0, int(math.ceil((mix_instruction_share * total) - instruction_count)))
+    needed_for_contract = max(0, int(math.ceil((contract_instruction_share_min * total) - contract_count)))
+    conversion_target = max(needed_for_retrieval, needed_for_instruction, needed_for_contract)
+
+    conversion_candidates: list[tuple[int, str]] = []
+    for idx, sample in enumerate(working):
+        if _sample_type(sample) != "retrieval":
+            continue
+        language = _detect_contract_language(sample, allowed_languages)
+        if language not in allowed_languages:
+            continue
+        conversion_candidates.append((idx, language))
+    rng.shuffle(conversion_candidates)
+
+    converted_to_contract = 0
+    for idx, language in conversion_candidates[:conversion_target]:
+        working[idx] = _build_contract_instruction_sample(
+            working[idx],
+            language=language,
+            fence_required_languages=fence_required_languages,
+        )
+        converted_to_contract += 1
+
+    total = len(working)
+    retrieval_count = sum(1 for sample in working if _sample_type(sample) == "retrieval")
+    instruction_count = total - retrieval_count
+    contract_count = sum(1 for sample in working if _sample_type(sample) == "contract_instruction")
+
+    drop_for_retrieval = _required_retrieval_drop_for_share(retrieval_count, total, mix_retrieval_share)
+    drop_for_instruction = _required_drop_for_fixed_numerator_share(instruction_count, total, mix_instruction_share)
+    drop_for_contract = _required_drop_for_fixed_numerator_share(contract_count, total, contract_instruction_share_min)
+    retrieval_drop_target = max(drop_for_retrieval, drop_for_instruction, drop_for_contract)
+
+    retrieval_indices = [idx for idx, sample in enumerate(working) if _sample_type(sample) == "retrieval"]
+    rng.shuffle(retrieval_indices)
+    drop_indices = set(retrieval_indices[:retrieval_drop_target])
+    if drop_indices:
+        retained = []
+        for idx, sample in enumerate(working):
+            if idx in drop_indices:
+                dropped = copy.deepcopy(sample)
+                dropped["rejection_reason"] = "format_alignment_retrieval_downsample"
+                dropped_samples.append(dropped)
+                continue
+            retained.append(sample)
+        working = retained
+
+    total = len(working)
+    retrieval_count = sum(1 for sample in working if _sample_type(sample) == "retrieval")
+    contract_count = sum(1 for sample in working if _sample_type(sample) == "contract_instruction")
+    fenced_count = sum(1 for sample in working if _has_any_fenced_block(str(sample.get("output", ""))))
+    instruction_count = total - retrieval_count
+    return working, {
+        "enabled": True,
+        "converted_to_contract": converted_to_contract,
+        "dropped_explain_topic": sum(
+            1 for sample in dropped_samples if sample.get("rejection_reason") == "format_alignment_drop_explain_topic"
+        ),
+        "dropped_retrieval": sum(
+            1 for sample in dropped_samples if sample.get("rejection_reason") == "format_alignment_retrieval_downsample"
+        ),
+        "retrieval_share": round(retrieval_count / total, 4) if total else 0.0,
+        "instruction_share": round(instruction_count / total, 4) if total else 0.0,
+        "contract_instruction_share": round(contract_count / total, 4) if total else 0.0,
+        "fenced_output_share": round(fenced_count / total, 4) if total else 0.0,
+        "dropped_samples": dropped_samples,
+    }
 
 
 def _compile_category_patterns(configured: dict[str, list[str]] | None = None) -> dict[str, list[Pattern[str]]]:
@@ -1050,8 +1288,19 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
         "max_output_chars": 6000,
         "max_repeated_line_ratio": DEFAULT_MAX_REPEATED_LINE_RATIO,
         "max_source_share": 0.55,
+        "fenced_output_share_min": 0.35,
+        "contract_instruction_share_min": 0.35,
+        "retrieval_share_max": 0.60,
         "deduplicate_normalized_output": True,
         "duplicate_resolution": "prefer_augmented_drop_retrieval",
+        "format_alignment": {
+            "enabled": True,
+            "mix_retrieval_share": 0.60,
+            "mix_instruction_share": 0.40,
+            "drop_explain_topic_prompts": True,
+            "allowed_languages": ["php", "yaml", "twig", "text"],
+            "fence_required_for_languages": ["php", "yaml", "twig"],
+        },
         "require_context_for_types": ["yaml_reference", "twig_reference", "code_reference"],
         "chunk_instruction_mode": "metadata_only",
         "chunk_retrieval_mode": "head_only",
@@ -1089,9 +1338,11 @@ def _read_refinement_config(config: dict[str, Any]) -> dict[str, Any]:
     merged_augmentation = defaults["augmentation"] | merged.get("augmentation", {})
     merged_weak_targets = defaults["weak_category_targets"] | merged.get("weak_category_targets", {})
     merged_weak_patterns = defaults["weak_category_patterns"] | merged.get("weak_category_patterns", {})
+    merged_format_alignment = defaults["format_alignment"] | merged.get("format_alignment", {})
     merged["augmentation"] = merged_augmentation
     merged["weak_category_targets"] = merged_weak_targets
     merged["weak_category_patterns"] = merged_weak_patterns
+    merged["format_alignment"] = merged_format_alignment
     return merged
 
 
@@ -1390,6 +1641,17 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             source_share_dropped
         )
 
+    final_records, format_alignment_summary = _apply_format_alignment(
+        final_records,
+        format_cfg=dict(refine_cfg.get("format_alignment", {})),
+        seed=int(refine_cfg["seed"]) + 131,
+        contract_instruction_share_min=float(refine_cfg.get("contract_instruction_share_min", 0.35)),
+    )
+    for dropped in format_alignment_summary.get("dropped_samples", []):
+        reason = str(dropped.get("rejection_reason", "format_alignment_drop"))
+        rejected_records.append(dropped)
+        rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+
     split_targets = config.get("dataset", {}).get("targets", {"train": 0.8, "valid": 0.1, "test": 0.1})
     splits = _split_dataset(final_records, split_targets, seed=int(refine_cfg["seed"]) + 101)
     for split_name, split_samples in splits.items():
@@ -1498,6 +1760,21 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
     ambiguity = _ambiguity_metrics(final_records)
     normalized_output_duplicate_ratio_after = _normalized_output_duplicate_ratio(final_records)
     empty_input_share_by_type = _empty_input_share_by_type(final_records)
+    final_total = len(final_records)
+    final_retrieval_count = sum(1 for sample in final_records if _sample_type(sample) == "retrieval")
+    final_instruction_count = final_total - final_retrieval_count
+    final_contract_instruction_count = sum(
+        1 for sample in final_records if _sample_type(sample) == "contract_instruction"
+    )
+    final_fenced_output_count = sum(
+        1 for sample in final_records if _has_any_fenced_block(str(sample.get("output", "")))
+    )
+    retrieval_share_final = round(final_retrieval_count / final_total, 4) if final_total else 0.0
+    instruction_share_final = round(final_instruction_count / final_total, 4) if final_total else 0.0
+    contract_instruction_share_final = (
+        round(final_contract_instruction_count / final_total, 4) if final_total else 0.0
+    )
+    fenced_output_share_final = round(final_fenced_output_count / final_total, 4) if final_total else 0.0
     final_artifact_counts = {
         "prompt_wrapper_echo": 0,
         "special_token_artifact": 0,
@@ -1518,6 +1795,9 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             final_artifact_counts[artifact_reason] += 1
 
     malformed_instruction_count = int(rejection_reasons.get("malformed_instruction_class_slot", 0))
+    fenced_output_share_min = float(refine_cfg.get("fenced_output_share_min", 0.35))
+    contract_instruction_share_min = float(refine_cfg.get("contract_instruction_share_min", 0.35))
+    retrieval_share_max = float(refine_cfg.get("retrieval_share_max", 0.60))
     quality_scorecard = {
         "dataset_version": refine_cfg["output_version"],
         "thresholds": {
@@ -1527,6 +1807,9 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             "train_output_p95_max": 9000,
             "ambiguous_pair_ratio_max": 0.01,
             "normalized_output_duplicate_ratio_max": 0.01,
+            "fenced_output_share_min": fenced_output_share_min,
+            "contract_instruction_share_min": contract_instruction_share_min,
+            "retrieval_share_max": retrieval_share_max,
             "empty_input_share_max_by_type": {
                 sample_type: 0.01
                 for sample_type in require_context_for_types_ordered
@@ -1542,9 +1825,18 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
             "ambiguous_pair_ratio": float(ambiguity["ambiguous_pair_ratio"]),
             "normalized_output_duplicate_ratio": normalized_output_duplicate_ratio_after,
             "empty_input_share_by_type": empty_input_share_by_type,
+            "retrieval_share": retrieval_share_final,
+            "instruction_share": instruction_share_final,
+            "contract_instruction_share": contract_instruction_share_final,
+            "fenced_output_share": fenced_output_share_final,
             "final_artifact_counts": final_artifact_counts,
             "weak_category_coverage": weak_category_coverage,
             "strict_weak_category_coverage": weak_category_coverage,
+            "format_alignment": {
+                key: value
+                for key, value in format_alignment_summary.items()
+                if key != "dropped_samples"
+            },
         },
     }
     quality_scorecard["checks"] = {
@@ -1554,6 +1846,9 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "train_output_p95": train_output_percentiles["p95"] <= 9000,
         "ambiguous_pair_ratio": float(ambiguity["ambiguous_pair_ratio"]) <= 0.01,
         "normalized_output_duplicate_ratio": normalized_output_duplicate_ratio_after <= 0.01,
+        "fenced_output_share": fenced_output_share_final >= fenced_output_share_min,
+        "contract_instruction_share": contract_instruction_share_final >= contract_instruction_share_min,
+        "retrieval_share": retrieval_share_final <= retrieval_share_max,
         "empty_input_share_by_type": all(
             empty_input_share_by_type.get(sample_type, 0.0) <= 0.01
             for sample_type in require_context_for_types_ordered
@@ -1609,6 +1904,10 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "normalized_output_dedup_dropped": len(dedupe_dropped),
         "normalized_output_duplicate_ratio_before_dedup": normalized_output_duplicate_ratio_before,
         "normalized_output_duplicate_ratio": normalized_output_duplicate_ratio_after,
+        "retrieval_share": retrieval_share_final,
+        "instruction_share": instruction_share_final,
+        "contract_instruction_share": contract_instruction_share_final,
+        "fenced_output_share": fenced_output_share_final,
         "ambiguous_pairs": int(ambiguity["ambiguous_pairs"]),
         "ambiguous_samples": int(ambiguity["ambiguous_samples"]),
         "ambiguous_pair_ratio": float(ambiguity["ambiguous_pair_ratio"]),
@@ -1625,6 +1924,11 @@ def run_dataset_refinement_stage(config: dict, logger: PipelineLogger, root: Pat
         "exclude_sources_prefixes": excluded_source_prefixes,
         "yield_breakdown": yield_breakdown,
         "feedback_targets": feedback_targets,
+        "format_alignment": {
+            key: value
+            for key, value in format_alignment_summary.items()
+            if key != "dropped_samples"
+        },
         "rejection_reasons": rejection_reasons,
         "sample_type_distribution": sample_type_distribution,
         "clean_pool_size": len(rebalanced_records),

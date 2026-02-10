@@ -288,8 +288,18 @@ dataset_refinement:
   max_output_chars: 6000
   max_repeated_line_ratio: 0.31
   max_source_share: 0.90
+  fenced_output_share_min: 0.35
+  contract_instruction_share_min: 0.35
+  retrieval_share_max: 0.60
   deduplicate_normalized_output: true
   duplicate_resolution: "prefer_augmented_drop_retrieval"
+  format_alignment:
+    enabled: true
+    mix_retrieval_share: 0.60
+    mix_instruction_share: 0.40
+    drop_explain_topic_prompts: true
+    allowed_languages: ["php", "yaml", "twig", "text"]
+    fence_required_for_languages: ["php", "yaml", "twig"]
   require_context_for_types:
     - "yaml_reference"
     - "twig_reference"
@@ -367,26 +377,26 @@ training:
     max_seq_len: 2048
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
-    max_steps: 250
+    max_steps: 200
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
     gradient_accumulation_steps: 16
-    learning_rate: 0.0001
+    learning_rate: 0.00005
     logging_steps: 5
     eval_strategy: "steps"
-    eval_steps: 50
+    eval_steps: 25
     save_strategy: "steps"
-    save_steps: 50
+    save_steps: 25
     warmup_ratio: 0.1
     fp16: false
     bf16: false
     gradient_checkpointing: true
     use_reentrant_gc: false
     group_by_length: false
-    lora_r: 32
-    lora_alpha: 64
+    lora_r: 16
+    lora_alpha: 32
     lora_dropout: 0.05
-    lora_target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
     bnb_4bit_compute_dtype: "float32"
     max_models: 1
     models:
@@ -445,6 +455,14 @@ evaluation:
   apply_generation_stop_truncation: true
   strict_contract_mode: true
   enforce_no_outside_prose_for_php_required: true
+  interim_autofencing:
+    enabled: true
+    apply_before_contract_checks: true
+    preserve_raw_output: true
+  checkpoint_sweep:
+    enabled: true
+    step_interval: 25
+    include_adapter: true
   generation_blocklist_strings:
     - "<|fim_prefix|>"
     - "<|fim_middle|>"

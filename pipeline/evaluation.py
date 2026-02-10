@@ -268,9 +268,23 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
         "apply_generation_stop_truncation": True,
         "strict_contract_mode": True,
         "enforce_no_outside_prose_for_php_required": True,
+        "interim_autofencing": {
+            "enabled": False,
+            "apply_before_contract_checks": True,
+            "preserve_raw_output": True,
+        },
+        "checkpoint_sweep": {
+            "enabled": False,
+            "step_interval": 0,
+            "include_adapter": True,
+            "explicit_steps": [],
+            "max_checkpoints": 0,
+        },
         "prompt_suite": DEFAULT_PROMPT_SUITE,
     }
     merged = defaults | config.get("evaluation", {})
+    merged["interim_autofencing"] = defaults["interim_autofencing"] | merged.get("interim_autofencing", {})
+    merged["checkpoint_sweep"] = defaults["checkpoint_sweep"] | merged.get("checkpoint_sweep", {})
     prompt_suite = merged.get("prompt_suite") or DEFAULT_PROMPT_SUITE
     normalized_prompts: list[dict[str, Any]] = []
     for item in prompt_suite:
@@ -437,6 +451,69 @@ def _contract_diagnostics(output: str) -> dict[str, Any]:
         "outside_prose_detected": len(outside_segments) > 0,
         "outside_prose_excerpt": outside_segments[0][:160] if outside_segments else "",
     }
+
+
+def _looks_like_yaml(output: str) -> bool:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return False
+    sample = lines[:40]
+    yaml_like = 0
+    for line in sample:
+        if line.startswith("#"):
+            continue
+        if ":" in line and not line.startswith("<?php") and not line.startswith("{%") and not line.startswith("{{"):
+            yaml_like += 1
+    return yaml_like >= max(1, len(sample) // 3)
+
+
+def _detect_autofence_language(output: str, prompt: dict[str, Any]) -> str:
+    instruction = str(prompt.get("instruction", "")).lower()
+    category = str(prompt.get("category", "")).lower()
+    requires_php = bool(prompt.get("requires_php", False))
+    output_lstrip = output.lstrip()
+    if output_lstrip.startswith("<?php") or requires_php:
+        return "php"
+    if "{{" in output or "{%" in output or category == "twig":
+        return "twig"
+    if "yaml" in instruction or category in {"routing", "di"}:
+        if _looks_like_yaml(output):
+            return "yaml"
+    if _looks_like_yaml(output):
+        return "yaml"
+    return ""
+
+
+def _normalize_output_with_interim_autofencing(
+    output: str,
+    *,
+    prompt: dict[str, Any],
+    eval_cfg: dict[str, Any],
+) -> tuple[str, list[str]]:
+    interim_cfg = dict(eval_cfg.get("interim_autofencing", {}))
+    if not bool(interim_cfg.get("enabled", False)):
+        return output, []
+    if not bool(interim_cfg.get("apply_before_contract_checks", True)):
+        return output, []
+
+    normalized = output.strip()
+    if not normalized:
+        return normalized, []
+    if _extract_fenced_code_blocks(normalized):
+        return normalized, []
+
+    flags: list[str] = []
+    if "```" in normalized:
+        normalized = normalized.replace("```", "").strip()
+        flags.append("removed_orphan_backticks")
+
+    language = _detect_autofence_language(normalized, prompt)
+    if not language:
+        return normalized, flags
+
+    wrapped = f"```{language}\n{normalized}\n```"
+    flags.append(f"wrapped_{language}_fence")
+    return wrapped, flags
 
 
 def _prompt_expected_contract(prompt: dict[str, Any], eval_cfg: dict[str, Any]) -> dict[str, Any]:
@@ -1239,6 +1316,55 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _checkpoint_sweep_summary(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_model: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        if result.get("variant") != "fine_tuned":
+            continue
+        model_name = str(result.get("model_name", ""))
+        by_model.setdefault(model_name, []).append(result)
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for model_name, rows in by_model.items():
+        root_name = model_name.split("@", 1)[0]
+        semantic_pass_rate = _average([1.0 if bool(row.get("passes_semantic", False)) else 0.0 for row in rows])
+        required_pass_rate = _average([1.0 if bool(row.get("passes_required", False)) else 0.0 for row in rows])
+        avg_score = _average([float(row.get("score", 0.0)) for row in rows])
+        grouped.setdefault(root_name, []).append(
+            {
+                "model_name": model_name,
+                "semantic_pass_rate": semantic_pass_rate,
+                "required_pass_rate": required_pass_rate,
+                "avg_score": avg_score,
+            }
+        )
+
+    summary: list[dict[str, Any]] = []
+    for root_name, candidates in grouped.items():
+        ordered = sorted(
+            candidates,
+            key=lambda item: (
+                item["semantic_pass_rate"],
+                item["required_pass_rate"],
+                item["avg_score"],
+            ),
+            reverse=True,
+        )
+        summary.append(
+            {
+                "base_model_name": root_name,
+                "selected_model_name": ordered[0]["model_name"],
+                "selection_rule": [
+                    "semantic_pass_rate",
+                    "required_pass_rate",
+                    "avg_score",
+                ],
+                "candidates": ordered,
+            }
+        )
+    return summary
+
+
 def _hash_directory(path: Path) -> str:
     files = sorted(item for item in path.rglob("*") if item.is_file())
     if not files:
@@ -1269,6 +1395,48 @@ def _write_sample_index(sample_outputs_dir: Path) -> Path:
 
 def _adapter_subdir_for_mode(mode: str) -> str:
     return "final" if mode in {"full_scale", "final"} else "test_run"
+
+
+def _checkpoint_step(path: Path) -> int:
+    try:
+        return int(path.name.split("-", 1)[1])
+    except Exception:
+        return -1
+
+
+def _checkpoint_targets(model_root: Path, sweep_cfg: dict[str, Any]) -> list[tuple[str, Path]]:
+    if not bool(sweep_cfg.get("enabled", False)):
+        return []
+
+    checkpoints = []
+    for path in sorted(model_root.glob("checkpoint-*"), key=_checkpoint_step):
+        if not path.is_dir():
+            continue
+        if not (path / "adapter_model.safetensors").exists():
+            continue
+        step = _checkpoint_step(path)
+        if step < 0:
+            continue
+        checkpoints.append((step, path))
+
+    explicit_steps = {
+        int(step)
+        for step in sweep_cfg.get("explicit_steps", [])
+        if str(step).strip().isdigit()
+    }
+    step_interval = int(sweep_cfg.get("step_interval", 0))
+    selected = []
+    for step, path in checkpoints:
+        if explicit_steps and step in explicit_steps:
+            selected.append((f"checkpoint-{step}", path))
+            continue
+        if step_interval > 0 and step % step_interval == 0:
+            selected.append((f"checkpoint-{step}", path))
+
+    max_checkpoints = int(sweep_cfg.get("max_checkpoints", 0))
+    if max_checkpoints > 0 and len(selected) > max_checkpoints:
+        selected = selected[-max_checkpoints:]
+    return selected
 
 
 def _reset_sample_outputs_dir(sample_outputs_dir: Path) -> None:
@@ -1372,6 +1540,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
     models_to_eval = models_to_eval[:max_models]
 
     adapter_subdir = _adapter_subdir_for_mode(str(eval_cfg.get("mode", "test_run")))
+    checkpoint_sweep_cfg = dict(eval_cfg.get("checkpoint_sweep", {}))
     ready_models: list[dict[str, Any]] = []
     blocked_models: list[dict[str, str]] = []
 
@@ -1387,22 +1556,57 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
             )
             continue
 
-        adapter_path = root / "models" / model_name / adapter_subdir / "adapter"
-        if not adapter_path.exists():
+        model_root = root / "models" / model_name / adapter_subdir
+        if not model_root.exists():
             blocked_models.append(
                 {
                     "model": model_name,
-                    "reason": f"adapter not found at {adapter_path}",
+                    "reason": f"model directory not found at {model_root}",
                 }
             )
             continue
 
-        manifest.add_input(
-            f"adapter_{model_name}",
-            adapter_subdir,
-            _hash_directory(adapter_path),
-        )
-        ready_models.append({"name": model_name, "base_model": base_model, "adapter_path": adapter_path})
+        targets: list[tuple[str, Path]] = []
+        if bool(checkpoint_sweep_cfg.get("enabled", False)):
+            targets.extend(_checkpoint_targets(model_root, checkpoint_sweep_cfg))
+            if bool(checkpoint_sweep_cfg.get("include_adapter", True)):
+                adapter_path = model_root / "adapter"
+                if adapter_path.exists():
+                    targets.append(("adapter", adapter_path))
+        else:
+            adapter_path = model_root / "adapter"
+            if adapter_path.exists():
+                targets.append(("adapter", adapter_path))
+
+        if not targets:
+            blocked_models.append(
+                {
+                    "model": model_name,
+                    "reason": f"no evaluation targets found under {model_root}",
+                }
+            )
+            continue
+
+        seen_target_names: set[str] = set()
+        for target_name, target_path in targets:
+            if target_name in seen_target_names:
+                continue
+            seen_target_names.add(target_name)
+            eval_model_name = model_name if target_name == "adapter" else f"{model_name}@{target_name}"
+            manifest.add_input(
+                f"adapter_{eval_model_name}",
+                adapter_subdir,
+                _hash_directory(target_path),
+            )
+            ready_models.append(
+                {
+                    "name": eval_model_name,
+                    "source_model_name": model_name,
+                    "base_model": base_model,
+                    "adapter_path": target_path,
+                    "target_name": target_name,
+                }
+            )
 
     if not ready_models:
         logger.error("No adapters available for Stage 8 evaluation.", blocked_models=blocked_models)
@@ -1468,7 +1672,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                     category = str(prompt.get("category", "general"))
 
                     logger.info(f"Generating {variant} output for {model_name}:{prompt_id}")
-                    raw_output = _generate_response(
+                    generated_output = _generate_response(
                         model=model,
                         tokenizer=tokenizer,
                         instruction=instruction,
@@ -1476,17 +1680,25 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         max_new_tokens=int(runtime_eval_cfg["max_new_tokens"]),
                         eval_cfg=runtime_eval_cfg,
                     )
-                    output, generation_guardrails = _truncate_on_generation_markers(raw_output, runtime_eval_cfg)
-                    contract_diagnostics = _contract_diagnostics(output)
-
-                    checks, required = _required_checks_for_prompt(
-                        prompt_id,
-                        output,
+                    raw_output, generation_guardrails = _truncate_on_generation_markers(
+                        generated_output,
+                        runtime_eval_cfg,
+                    )
+                    normalized_output, postprocess_flags = _normalize_output_with_interim_autofencing(
+                        raw_output,
                         prompt=prompt,
                         eval_cfg=runtime_eval_cfg,
-                        contract_diagnostics=contract_diagnostics,
                     )
-                    external_checks = _run_external_checks(output, runtime_eval_cfg)
+
+                    raw_contract_diagnostics = _contract_diagnostics(raw_output)
+                    checks, required = _required_checks_for_prompt(
+                        prompt_id,
+                        raw_output,
+                        prompt=prompt,
+                        eval_cfg=runtime_eval_cfg,
+                        contract_diagnostics=raw_contract_diagnostics,
+                    )
+                    external_checks = _run_external_checks(raw_output, runtime_eval_cfg)
                     checks, required = _apply_external_required_checks(
                         prompt_id=prompt_id,
                         prompt=prompt,
@@ -1494,32 +1706,78 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         required=required,
                         external_checks=external_checks,
                     )
-                    format_sanity = _compute_format_sanity(output)
-                    artifact_guard = _artifact_guard(output, generation_guardrails=generation_guardrails)
+                    format_sanity = _compute_format_sanity(raw_output)
+                    artifact_guard = _artifact_guard(raw_output, generation_guardrails=generation_guardrails)
                     score = _score_result(checks, required, external_checks, artifact_guard=artifact_guard)
 
-                    output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}.txt"
-                    with open(output_path, "w", encoding="utf-8") as handle:
-                        handle.write(output)
+                    normalized_contract_diagnostics = _contract_diagnostics(normalized_output)
+                    normalized_checks, normalized_required = _required_checks_for_prompt(
+                        prompt_id,
+                        normalized_output,
+                        prompt=prompt,
+                        eval_cfg=runtime_eval_cfg,
+                        contract_diagnostics=normalized_contract_diagnostics,
+                    )
+                    normalized_external_checks = external_checks
+                    if normalized_output != raw_output:
+                        normalized_external_checks = _run_external_checks(normalized_output, runtime_eval_cfg)
+                    normalized_checks, normalized_required = _apply_external_required_checks(
+                        prompt_id=prompt_id,
+                        prompt=prompt,
+                        checks=normalized_checks,
+                        required=normalized_required,
+                        external_checks=normalized_external_checks,
+                    )
+                    normalized_format_sanity = _compute_format_sanity(normalized_output)
+                    normalized_artifact_guard = _artifact_guard(
+                        normalized_output,
+                        generation_guardrails=generation_guardrails,
+                    )
+                    normalized_score = _score_result(
+                        normalized_checks,
+                        normalized_required,
+                        normalized_external_checks,
+                        artifact_guard=normalized_artifact_guard,
+                    )
+
+                    raw_output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}__raw.txt"
+                    normalized_output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}__normalized.txt"
+                    with open(raw_output_path, "w", encoding="utf-8") as handle:
+                        handle.write(raw_output)
+                    with open(normalized_output_path, "w", encoding="utf-8") as handle:
+                        handle.write(normalized_output)
 
                     result = {
                         "timestamp": _iso_timestamp(),
                         "model_name": model_name,
+                        "source_model_name": model_cfg.get("source_model_name", model_name),
+                        "eval_target": model_cfg.get("target_name", "adapter"),
                         "base_model": base_model_id,
                         "variant": variant,
                         "prompt_id": prompt_id,
                         "category": category,
                         "instruction": instruction,
                         "input": input_text,
-                        "output_file": output_path.relative_to(root).as_posix(),
-                        "output_length": len(output),
+                        "output_file": raw_output_path.relative_to(root).as_posix(),
+                        "raw_output_file": raw_output_path.relative_to(root).as_posix(),
+                        "normalized_output_file": normalized_output_path.relative_to(root).as_posix(),
+                        "postprocess_flags": postprocess_flags,
+                        "output_length": len(raw_output),
+                        "normalized_output_length": len(normalized_output),
                         "checks": checks,
                         "required_checks": required,
                         "external_checks": external_checks,
                         "format_sanity": format_sanity,
-                        "contract_diagnostics": contract_diagnostics,
+                        "contract_diagnostics": raw_contract_diagnostics,
                         "generation_guardrails": generation_guardrails,
                         "artifact_guard": artifact_guard,
+                        "normalized_checks": normalized_checks,
+                        "normalized_required_checks": normalized_required,
+                        "normalized_external_checks": normalized_external_checks,
+                        "normalized_contract_diagnostics": normalized_contract_diagnostics,
+                        "normalized_format_sanity": normalized_format_sanity,
+                        "normalized_artifact_guard": normalized_artifact_guard,
+                        "normalized_result": normalized_score,
                     }
                     result.update(score)
                     all_results.append(result)
@@ -1535,6 +1793,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
         return 1
 
     summary = summarize_results(all_results)
+    checkpoint_sweep_summary = _checkpoint_sweep_summary(all_results)
     metrics = {
         "stage": "evaluation",
         "timestamp": _iso_timestamp(),
@@ -1545,6 +1804,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
         "generation_profile": generation_profile,
         "blocked_models": blocked_models,
         "summary": summary,
+        "checkpoint_sweep_selection": checkpoint_sweep_summary,
         "results": all_results,
     }
 
@@ -1575,6 +1835,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
             "artifact_blocklist_version": generation_profile["artifact_blocklist_version"],
             "blocked_models": len(blocked_models),
             "result_count": len(all_results),
+            "checkpoint_sweep_selection_count": len(checkpoint_sweep_summary),
         }
     )
     manifest.save(eval_dir / "manifest.json")
@@ -1594,6 +1855,7 @@ __all__ = [
     "_build_generation_kwargs",
     "_contract_diagnostics",
     "_extract_code_blocks",
+    "_normalize_output_with_interim_autofencing",
     "_required_checks_for_prompt",
     "_score_result",
     "_truncate_on_generation_markers",

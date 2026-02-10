@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from pipeline.evaluation import (
+    _checkpoint_targets,
     _apply_external_required_checks,
     _artifact_guard,
     _build_generation_kwargs,
@@ -13,6 +14,7 @@ from pipeline.evaluation import (
     _compute_format_sanity,
     _extract_code_blocks,
     _load_model_for_evaluation,
+    _normalize_output_with_interim_autofencing,
     _reset_sample_outputs_dir,
     _required_checks_for_prompt,
     _run_external_checks,
@@ -25,6 +27,54 @@ from pipeline.evaluation import (
 
 
 class EvaluationHelpersTest(unittest.TestCase):
+    def test_normalize_output_with_interim_autofencing_wraps_raw_php(self):
+        output, flags = _normalize_output_with_interim_autofencing(
+            "<?php\nfinal class Example {}\n",
+            prompt={"requires_php": True, "category": "attributes", "instruction": "Return one fenced php block."},
+            eval_cfg={"interim_autofencing": {"enabled": True, "apply_before_contract_checks": True}},
+        )
+        self.assertTrue(output.startswith("```php"))
+        self.assertIn("wrapped_php_fence", flags)
+
+    def test_normalize_output_with_interim_autofencing_wraps_yaml(self):
+        output, flags = _normalize_output_with_interim_autofencing(
+            "services:\n  gym.foo:\n    class: Drupal\\gym\\Foo\n",
+            prompt={"requires_php": False, "category": "di", "instruction": "Return yaml only."},
+            eval_cfg={"interim_autofencing": {"enabled": True, "apply_before_contract_checks": True}},
+        )
+        self.assertTrue(output.startswith("```yaml"))
+        self.assertIn("wrapped_yaml_fence", flags)
+
+    def test_normalize_output_with_interim_autofencing_keeps_existing_fence(self):
+        original = "```twig\n<div>{{ content }}</div>\n```"
+        output, flags = _normalize_output_with_interim_autofencing(
+            original,
+            prompt={"requires_php": False, "category": "twig", "instruction": "Return one fenced twig block."},
+            eval_cfg={"interim_autofencing": {"enabled": True, "apply_before_contract_checks": True}},
+        )
+        self.assertEqual(output, original)
+        self.assertEqual(flags, [])
+
+    def test_checkpoint_targets_selects_interval_and_explicit_steps(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model_root = Path(tmp_dir)
+            for step in (10, 25, 50, 75):
+                checkpoint_dir = model_root / f"checkpoint-{step}"
+                checkpoint_dir.mkdir(parents=True)
+                (checkpoint_dir / "adapter_model.safetensors").write_text("x", encoding="utf-8")
+
+            selected = _checkpoint_targets(
+                model_root,
+                {
+                    "enabled": True,
+                    "step_interval": 25,
+                    "explicit_steps": [10],
+                    "max_checkpoints": 0,
+                },
+            )
+            names = [name for name, _path in selected]
+            self.assertEqual(names, ["checkpoint-10", "checkpoint-25", "checkpoint-50", "checkpoint-75"])
+
     def test_build_generation_kwargs_includes_repetition_controls(self):
         class FakeTokenizer:
             pad_token_id = 0
