@@ -720,6 +720,8 @@ def _run_php_lint(snippets: list[str]) -> dict[str, Any]:
                 check=False,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -735,7 +737,14 @@ def _run_php_lint(snippets: list[str]) -> dict[str, Any]:
 
 
 def _has_drupal_phpcs_standard(phpcs_bin: str) -> bool:
-    proc = subprocess.run([phpcs_bin, "-i"], check=False, capture_output=True, text=True)
+    proc = subprocess.run(
+        [phpcs_bin, "-i"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     output = (proc.stdout or "") + "\n" + (proc.stderr or "")
     return "Drupal" in output
 
@@ -817,6 +826,8 @@ def _run_phpcs(snippets: list[str]) -> dict[str, Any]:
                 check=False,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -912,6 +923,8 @@ def _run_phpstan(snippets: list[str], failure_mode: str = "syntax_only") -> dict
                 check=False,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         finally:
             tmp_path.unlink(missing_ok=True)
