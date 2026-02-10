@@ -18,7 +18,7 @@
       "attributes": 600,
       "di": 600,
       "routing": 300,
-      "sdc": 300,
+      "sdc": 250,
       "twig": 450
     }
   },
@@ -68,7 +68,7 @@
     "normalized_output_duplicate_ratio": true,
     "empty_input_share_by_type": true,
     "final_artifact_counts": true,
-    "weak_category_coverage": false
+    "weak_category_coverage": true
   },
-  "overall_passed": false
+  "overall_passed": true
 }

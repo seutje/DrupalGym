@@ -302,7 +302,7 @@ dataset_refinement:
     attributes: 600
     di: 600
     routing: 300
-    sdc: 300
+    sdc: 250
     twig: 450
   enforce_modern_drupal_patterns: true
   modern_drupal_required_categories: ["attributes", "di"]

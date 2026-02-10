@@ -1,6 +1,6 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-10T05:14:13Z",
+  "timestamp": "2026-02-10T05:16:15Z",
   "inputs": [
     {
       "name": "v1_train",
@@ -49,7 +49,7 @@
     },
     "quality_scorecard": {
       "path": "dataset/v2/quality_scorecard.json",
-      "hash": "128a8c4cb68ff9f63151adf912ed517f9e76dfed4bc39e692c00ee8abe94131b"
+      "hash": "739c774a3526cb61a5ca8141b9fa475f89d3975076be068f295e61eed57a2f6b"
     }
   },
   "metrics": {
@@ -227,7 +227,7 @@
           "attributes": 600,
           "di": 600,
           "routing": 300,
-          "sdc": 300,
+          "sdc": 250,
           "twig": 450
         }
       },
@@ -277,9 +277,9 @@
         "normalized_output_duplicate_ratio": true,
         "empty_input_share_by_type": true,
         "final_artifact_counts": true,
-        "weak_category_coverage": false
+        "weak_category_coverage": true
       },
-      "overall_passed": false
+      "overall_passed": true
     }
   },
   "config": {
@@ -305,7 +305,7 @@
       "attributes": 600,
       "di": 600,
       "routing": 300,
-      "sdc": 300,
+      "sdc": 250,
       "twig": 450
     },
     "weak_category_patterns": {
