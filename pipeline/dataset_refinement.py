@@ -11,7 +11,7 @@ from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
 
 RETRIEVAL_PROMPT_RE = re.compile(
-    r"^Show me the implementation of the (?P<kind>class|interface|trait|enum) (?P<symbol>[A-Za-z_][A-Za-z0-9_]*) in the file (?P<path>.+)\.$"
+    r"^Show me the implementation of the (?P<kind>class|interface|trait|enum) (?P<symbol>[A-Za-z_][A-Za-z0-9_]*) in the file (?P<path>.+?)\.(?: Return one fenced php block only\.)?$"
 )
 VALID_SYMBOL_RE = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 DECLARATION_RE = re.compile(r"\b(class|interface|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")

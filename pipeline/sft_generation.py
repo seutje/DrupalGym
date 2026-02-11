@@ -321,10 +321,14 @@ class InstructionGenerator:
 
         if self.enable_symbol_kind_prompts:
             instruction = (
-                f"Show me the implementation of the {symbol_kind} {symbol_name} in the file {SOURCE_FILE_PLACEHOLDER}."
+                f"Show me the implementation of the {symbol_kind} {symbol_name} in the file {SOURCE_FILE_PLACEHOLDER}. "
+                "Return one fenced php block only."
             )
         else:
-            instruction = f"Show me the implementation of the class {symbol_name} in the file {SOURCE_FILE_PLACEHOLDER}."
+            instruction = (
+                f"Show me the implementation of the class {symbol_name} in the file {SOURCE_FILE_PLACEHOLDER}. "
+                "Return one fenced php block only."
+            )
 
         input_text = "\n".join(
             [
@@ -355,14 +359,17 @@ class InstructionGenerator:
         stem = Path(rel_path).stem.replace("_", " ")
         source_file = self._file_hint(rel_path)
         module_hint = self._module_hint(rel_path)
-        instruction = f"Provide the Drupal 11 YAML configuration from {SOURCE_FILE_PLACEHOLDER}."
+        instruction = (
+            f"Provide the Drupal 11 YAML configuration from {SOURCE_FILE_PLACEHOLDER}. "
+            "Return one fenced yaml block only."
+        )
         input_text = "\n".join(
             [
                 f"Source file: {SOURCE_FILE_PLACEHOLDER}",
                 f"File name hint: {source_file}",
                 f"Module hint: {module_hint}",
                 f"Configuration topic: {stem}",
-                "Task: Return the complete Drupal 11 YAML configuration.",
+                "Task: Return the complete Drupal 11 YAML configuration in one fenced yaml block.",
             ]
         )
         self._append(

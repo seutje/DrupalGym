@@ -12,7 +12,7 @@ from .manifest import Manifest, calculate_hash
 
 
 SYMBOL_PROMPT_RE = re.compile(
-    r"^Show me the implementation of the (class|interface|trait|enum) ([A-Za-z_][A-Za-z0-9_]*) in the file (.+)\.$"
+    r"^Show me the implementation of the (class|interface|trait|enum) ([A-Za-z_][A-Za-z0-9_]*) in the file (.+?)\.(?: Return one fenced php block only\.)?$"
 )
 PROMPT_WRAPPER_RE = re.compile(r"(?mi)^\s*(instruction|input|output|response|assistant|user)\s*:")
 MALFORMED_WRAPPER_RE = re.compile(

@@ -60,7 +60,7 @@ class SftGenerationHelpersTest(unittest.TestCase):
         sample = self.generator.samples[0]
         self.assertEqual(
             sample["instruction"],
-            "Provide the Drupal 11 YAML configuration from <source_file>.",
+            "Provide the Drupal 11 YAML configuration from <source_file>. Return one fenced yaml block only.",
         )
         self.assertNotIn("repos/", sample["instruction"])
         self.assertNotIn("explain what it defines", sample["instruction"].lower())

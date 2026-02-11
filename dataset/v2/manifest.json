@@ -1,39 +1,39 @@
 {
   "stage": "dataset_refinement",
-  "timestamp": "2026-02-10T16:19:35Z",
+  "timestamp": "2026-02-11T04:39:55Z",
   "inputs": [
     {
       "name": "v1_train",
       "version": "v1",
-      "hash": "dc1d8180cc5ccecf9095bbbf0776499a86fbe1189aa3868490a141782267ef86"
+      "hash": "e8275d59f5db54af681bd1ac8fa469b6e5380baa40ca1b0f1cb859210a8c94db"
     },
     {
       "name": "v1_valid",
       "version": "v1",
-      "hash": "c0176657e5c3c8d6f775b7175b4f172c1a819f2c6fc69ef198ff823e81f4b461"
+      "hash": "39f227cde1ec1e22d919b878807856805b648f0c977a4766a98a66ba0ffcddd7"
     },
     {
       "name": "v1_test",
       "version": "v1",
-      "hash": "644a135476154838da23784df395bc78ff9f1fdfa2f6212d9eb040a2ae815e55"
+      "hash": "fa07967629497680466b1cd917c01c318fc6571719305b8747f88b5a9ec0aa54"
     }
   ],
   "outputs": {
     "train_split": {
       "path": "dataset/v2/train.jsonl",
-      "hash": "c42302531138b6856a211441bf80faeaddc3b657f7306704dfbde61c5438c914"
+      "hash": "491faf0c3a04783e6e3672d919bb4dfd07f8a41e31cab5354846a67d2427c74e"
     },
     "valid_split": {
       "path": "dataset/v2/valid.jsonl",
-      "hash": "790c33f372158ab6ceeebf1e20112288d06c174fa1ad34c2fbd80c398aea4620"
+      "hash": "038e65c04b98a654f6fac45d3faee96d254cc939e4ad29c598081c2313e98571"
     },
     "test_split": {
       "path": "dataset/v2/test.jsonl",
-      "hash": "0eb956858e653dc27194dc7bd6711d8d718f94f1148817df1ccbebdf553603d3"
+      "hash": "289bc2101572ef60cd920bf8aede92ee6dbfc21adbad7c88628011cfefa5df03"
     },
     "rejected_samples": {
       "path": "dataset/v2/rejected.jsonl",
-      "hash": "a70be89a18b9816865242840b76debe4ef3046b15756093e247045a1743c3b9e"
+      "hash": "a09a2a980ea471ffef12ff5be4c0c11ec5d92579bea0e9b7a9d7c51f78630af3"
     },
     "eval_candidate_pool": {
       "path": "dataset/v2/eval_candidate_pool.jsonl",
@@ -41,7 +41,7 @@
     },
     "training_pool_clean": {
       "path": "dataset/v2/training_pool_clean.jsonl",
-      "hash": "fdcd41f8d8b216c338e29a2f61e144e9fbf047890e14c5d4906854f5e679ff43"
+      "hash": "138491b3452e3ee45175d4250b328243e8d99f71d247637c3650411f0355e3e8"
     },
     "training_pool_experimental": {
       "path": "dataset/v2/training_pool_experimental.jsonl",
@@ -110,34 +110,34 @@
         "twig",
         "attributes",
         "di",
-        "sdc",
-        "routing"
+        "routing",
+        "sdc"
       ],
       "details": [
         {
           "category": "twig",
-          "negative_prompt_count": 3,
-          "avg_delta": -0.5867
+          "negative_prompt_count": 35,
+          "avg_delta": -0.4273
         },
         {
           "category": "attributes",
-          "negative_prompt_count": 7,
-          "avg_delta": -0.3772
+          "negative_prompt_count": 47,
+          "avg_delta": -0.3457
         },
         {
           "category": "di",
-          "negative_prompt_count": 7,
-          "avg_delta": -0.3101
-        },
-        {
-          "category": "sdc",
-          "negative_prompt_count": 3,
-          "avg_delta": -0.2667
+          "negative_prompt_count": 55,
+          "avg_delta": -0.3268
         },
         {
           "category": "routing",
-          "negative_prompt_count": 6,
-          "avg_delta": -0.2455
+          "negative_prompt_count": 52,
+          "avg_delta": -0.2885
+        },
+        {
+          "category": "sdc",
+          "negative_prompt_count": 32,
+          "avg_delta": -0.2348
         }
       ]
     },
