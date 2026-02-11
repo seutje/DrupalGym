@@ -492,7 +492,7 @@ evaluation:
   max_new_tokens: 512
   min_new_tokens: 0
   device: "cuda"
-  load_in_4bit: false
+  load_in_4bit: true
   bnb_4bit_compute_dtype: "float16"
   max_models: 1
   run_php_lint: true

@@ -1469,7 +1469,15 @@ def _strip_pretrained_quantization_config(config_obj, logger: PipelineLogger):
     from_dict = getattr(config_cls, "from_dict", None)
     if callable(from_dict):
         try:
-            return from_dict(config_data)
+            rebuilt = from_dict(config_data)
+            # Some transformer versions keep this attribute on the config object;
+            # remove it explicitly so quantization merge logic does not re-interpret it.
+            try:
+                if hasattr(rebuilt, "quantization_config"):
+                    delattr(rebuilt, "quantization_config")
+            except Exception:
+                pass
+            return rebuilt
         except Exception:
             return config_obj
     return config_obj
