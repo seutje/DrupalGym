@@ -1,58 +1,12 @@
 import os
 import json
 import re
-import copy
 import shutil
 import subprocess
 import tempfile
 import traceback
 import torch
 from typing import Any
-
-def patch_torch_matmul():
-    if getattr(torch, "matmul_orig", None):
-        return
-    torch.matmul_orig = torch.matmul
-    def patched_matmul(a, b, out=None):
-        if a.is_cuda and out is None:
-            if a.dim() == 2 and b.dim() == 2:
-                return torch.mm(a, b)
-            
-            # Handle the case where one is 2D and the other is >2D
-            if a.dim() > 2 and b.dim() == 2:
-                a_shape = a.shape
-                res = torch.mm(a.reshape(-1, a_shape[-1]), b)
-                return res.reshape(*a_shape[:-1], b.shape[-1])
-            
-            if a.dim() == 2 and b.dim() > 2:
-                # b is (Batch, N, P), a is (M, N)
-                # This is less common but can happen
-                b_shape = b.shape
-                # We want (M, N) @ (Batch, N, P) -> (Batch, M, P)
-                # torch.matmul does this by broadcasting a
-                res = torch.mm(a, b.transpose(0, 1).reshape(b_shape[1], -1))
-                return res.reshape(a.shape[0], b_shape[0], b_shape[2]).transpose(0, 1)
-
-            if a.dim() >= 3 and b.dim() >= 3:
-                # Batched matmul with both side batched
-                # If they have same batch dims, we can loop
-                if a.shape[:-2] == b.shape[:-2]:
-                    if a.dim() == 3:
-                        res = torch.empty(a.shape[0], a.shape[1], b.shape[2], device=a.device, dtype=a.dtype)
-                        for i in range(a.shape[0]):
-                            res[i] = torch.mm(a[i], b[i])
-                        return res
-                    if a.dim() == 4:
-                        res = torch.empty(a.shape[0], a.shape[1], a.shape[2], b.shape[3], device=a.device, dtype=a.dtype)
-                        for i in range(a.shape[0]):
-                            for j in range(a.shape[1]):
-                                res[i, j] = torch.mm(a[i, j], b[i, j])
-                        return res
-        
-        return torch.matmul_orig(a, b, out=out)
-    torch.matmul = patched_matmul
-
-patch_torch_matmul()
 
 from pathlib import Path
 from .logger import PipelineLogger
@@ -99,98 +53,96 @@ def _dependency_versions() -> dict[str, str]:
     return versions
 
 
-def _build_model_config_with_compat_fixes(
-    *,
-    model_name: str,
-    logger: PipelineLogger,
-    auto_config_cls,
-    mistral3_config_cls=None,
-    config_dict_loader=None,
-):
+def _ensure_native_ministral3_support(model_name: str):
+    if "ministral-3" not in model_name.lower():
+        return
     try:
-        return auto_config_cls.from_pretrained(model_name, trust_remote_code=True)
-    except (KeyError, RuntimeError, ValueError) as exc:
-        exc_str = str(exc).lower()
-        if "ministral3" not in exc_str and "mistral3" not in exc_str:
-            raise
+        import transformers
 
-        if mistral3_config_cls is None:
-            try:
-                from transformers import MinistralConfig
-                mistral3_config_cls = MinistralConfig
-                target_type = "ministral"
-            except ImportError:
-                try:
-                    from transformers import MistralConfig
-                    mistral3_config_cls = MistralConfig
-                    target_type = "mistral"
-                except ImportError:
-                    try:
-                        from transformers.models.mistral3.configuration_mistral3 import Mistral3Config
-                        mistral3_config_cls = Mistral3Config
-                        target_type = "mistral"
-                    except Exception:
-                        raise
-
-        if config_dict_loader is not None:
-            config_data = config_dict_loader(model_name)
-        else:
-            # Safely try to get the config dict without relying on missing AutoConfig methods
-            try:
-                from huggingface_hub import hf_hub_download
-                config_path = hf_hub_download(repo_id=model_name, filename="config.json")
-                with open(config_path, "r", encoding="utf-8") as handle:
-                    config_data = json.load(handle)
-            except Exception as loader_exc:
-                # Fallback to internal transformers method if available
-                get_config_dict = getattr(auto_config_cls, "get_config_dict", None)
-                if callable(get_config_dict):
-                    config_data, _ = get_config_dict(model_name, trust_remote_code=True)
-                else:
-                    raise RuntimeError(
-                        f"Unable to load raw model config for Ministral compatibility patch: {loader_exc}"
-                    ) from loader_exc
-
-        patched = copy.deepcopy(config_data)
-        
-        # Remove pre-existing quantization_config to avoid conflicts with our BitsAndBytesConfig
-        if "quantization_config" in patched:
-            logger.info("Removing pre-existing quantization_config from model config to avoid conflicts.")
-            del patched["quantization_config"]
-
-        # Patch top-level model_type if it's mistral3/ministral3
-        if str(patched.get("model_type", "")).lower() in ("ministral3", "mistral3"):
-            patched["model_type"] = target_type
-
-        # Patch text_config if present (common in hierarchical configs)
-        text_cfg = patched.get("text_config")
-        if isinstance(text_cfg, dict):
-            if str(text_cfg.get("model_type", "")).lower() in ("ministral3", "mistral3"):
-                text_cfg["model_type"] = "mistral"
-            
-            # Promote key parameters to top-level for compatibility with CausalLM classes
-            for key in ["hidden_size", "num_attention_heads", "num_hidden_layers", 
-                        "num_key_value_heads", "head_dim", "rms_norm_eps", 
-                        "intermediate_size", "max_position_embeddings", "vocab_size"]:
-                if key in text_cfg and key not in patched:
-                    patched[key] = text_cfg[key]
-            
-            from transformers import MistralConfig
-            patched["text_config"] = MistralConfig.from_dict(text_cfg)
-
-        # Patch vision_config if present
-        vision_cfg = patched.get("vision_config")
-        if isinstance(vision_cfg, dict):
-            from transformers import PixtralVisionConfig
-            patched["vision_config"] = PixtralVisionConfig.from_dict(vision_cfg)
-
-        logger.info(
-            f"Applied compatibility patch for Ministral-3 using {mistral3_config_cls.__name__}.",
-            model=model_name,
-            target_type=target_type
+        version = str(getattr(transformers, "__version__", "unknown"))
+    except Exception:
+        version = "unknown"
+    match = re.match(r"^(\d+)\.(\d+)", version)
+    if not match:
+        raise RuntimeError(
+            f"Unable to verify native Ministral-3 support for transformers={version}. "
+            "Install transformers>=5.0.0 and retry stage 7."
+        )
+    major = int(match.group(1))
+    if major < 5:
+        raise RuntimeError(
+            f"Ministral-3 requires transformers>=5.0.0; detected transformers={version}. "
+            "Install a supported transformers version and retry stage 7."
         )
 
-        return mistral3_config_cls.from_dict(patched)
+
+def _normalize_ministral3_config_for_causallm(model_name: str, config_obj, logger: PipelineLogger):
+    if "ministral-3" not in model_name.lower():
+        return config_obj
+
+    class_name = type(config_obj).__name__
+    if class_name != "Mistral3Config":
+        return config_obj
+
+    try:
+        from transformers import Ministral3Config
+    except Exception:
+        return config_obj
+
+    logger.info(
+        "Normalizing Mistral3Config to Ministral3Config for AutoModelForCausalLM compatibility.",
+        model=model_name,
+    )
+    return Ministral3Config.from_dict(config_obj.to_dict())
+
+
+def _strip_pretrained_quantization_config(config_obj, logger: PipelineLogger):
+    config_dict_getter = getattr(config_obj, "to_dict", None)
+    if not callable(config_dict_getter):
+        return config_obj
+    config_data = config_dict_getter()
+    if not isinstance(config_data, dict) or "quantization_config" not in config_data:
+        return config_obj
+
+    logger.info("Removing pre-existing quantization_config from model config to avoid conflicts.")
+    config_data = dict(config_data)
+    config_data.pop("quantization_config", None)
+    config_cls = type(config_obj)
+    from_dict = getattr(config_cls, "from_dict", None)
+    if callable(from_dict):
+        try:
+            return from_dict(config_data)
+        except Exception:
+            return config_obj
+    return config_obj
+
+
+def _coerce_model_config_object(config_obj, logger: PipelineLogger):
+    if not isinstance(config_obj, dict):
+        return config_obj
+    model_type = str(config_obj.get("model_type", "")).strip().lower()
+    try:
+        if model_type == "ministral3":
+            from transformers import Ministral3Config
+
+            rebuilt = Ministral3Config.from_dict(config_obj)
+        else:
+            from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+
+            config_cls = CONFIG_MAPPING[model_type]
+            rebuilt = config_cls.from_dict(config_obj)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Model config unexpectedly became a dict for model_type={model_type or 'unknown'} "
+            "and could not be rebuilt into a config object."
+        ) from exc
+
+    logger.info(
+        "Rebuilt dict model config into config object.",
+        model_type=model_type or "unknown",
+        rebuilt_type=type(rebuilt).__name__,
+    )
+    return rebuilt
 
 
 def _raise_actionable_model_load_error(exc: Exception, model_name: str):
@@ -204,7 +156,19 @@ def _raise_actionable_model_load_error(exc: Exception, model_name: str):
         raise RuntimeError(
             "Model load failed because the installed `transformers` build does not recognize "
             f"model_type `ministral3` for {model_name} (detected transformers={version}). "
-            "Upgrade `transformers` to a version that supports Ministral-3 and retry stage 7."
+            "Install transformers>=5.0.0 and retry stage 7."
+        ) from exc
+    message = str(exc).lower()
+    if "ministral3" in message or "mistral3" in message:
+        try:
+            import transformers
+
+            version = getattr(transformers, "__version__", "unknown")
+        except Exception:
+            version = "unknown"
+        raise RuntimeError(
+            f"Model load failed for {model_name} without native Ministral-3 support "
+            f"(detected transformers={version}). Install transformers>=5.0.0 and retry stage 7."
         ) from exc
     raise exc
 
@@ -261,15 +225,33 @@ def _find_subsequence(tokens: list[int], pattern: list[int]) -> int:
     return -1
 
 
-def _build_completion_labels(token_ids: list[int], marker_tokens: list[int]) -> list[int]:
+def _build_completion_labels(
+    token_ids: list[int], marker_token_variants: list[list[int]]
+) -> tuple[list[int], bool]:
     labels = list(token_ids)
-    marker_index = _find_subsequence(token_ids, marker_tokens)
+    marker_index = -1
+    marker_len = 0
+    for marker_tokens in marker_token_variants:
+        marker_index = _find_subsequence(token_ids, marker_tokens)
+        if marker_index >= 0:
+            marker_len = len(marker_tokens)
+            break
+
     if marker_index >= 0:
-        response_start = marker_index + len(marker_tokens)
+        response_start = marker_index + marker_len
         for idx in range(response_start):
             labels[idx] = -100
-        return labels
-    return [-100] * len(labels)
+        return labels, True
+    return labels, False
+
+
+def _build_completion_marker_variants(tokenizer, completion_marker: str) -> list[list[int]]:
+    variants: list[list[int]] = []
+    for candidate in (completion_marker, f" {completion_marker}", f"\n{completion_marker}"):
+        token_ids = tokenizer(candidate, add_special_tokens=False)["input_ids"]
+        if token_ids and token_ids not in variants:
+            variants.append(token_ids)
+    return variants
 
 
 def _resolve_prompt_template(model_config: dict[str, Any]) -> str:
@@ -594,6 +576,7 @@ def train_model(
         AutoModelForCausalLM,
         AutoTokenizer,
         BitsAndBytesConfig,
+        Mistral3ForConditionalGeneration,
         TrainingArguments,
         Trainer,
     )
@@ -601,6 +584,7 @@ def train_model(
 
     model_name = model_config["base_model"]
     logger.info(f"Starting training for {model_name}")
+    _ensure_native_ministral3_support(model_name)
 
     # 1. Load Dataset
     data_files = {
@@ -630,8 +614,8 @@ def train_model(
         prompt_template = PROMPT_TEMPLATE_PLAIN
 
     completion_marker = _completion_marker_for_prompt_template(prompt_template)
-    marker_tokens = tokenizer(completion_marker, add_special_tokens=False)["input_ids"]
-    if not marker_tokens:
+    marker_token_variants = _build_completion_marker_variants(tokenizer, completion_marker)
+    if not marker_token_variants:
         raise ValueError(f"Unable to tokenize completion marker: {completion_marker!r}")
     logger.info(
         "Using training prompt template.",
@@ -639,16 +623,32 @@ def train_model(
         completion_marker=completion_marker,
     )
 
+    marker_miss_tracker = {"missing": 0, "seen": 0}
+
     def tokenize_function(examples):
         texts = [
             _format_training_text(ins, inp, out, prompt_template=prompt_template)
             for ins, inp, out in zip(examples["instruction"], examples["input"], examples["output"])
         ]
         tokenized = tokenizer(texts, truncation=True, max_length=train_cfg["max_seq_len"])
-        tokenized["labels"] = [_build_completion_labels(token_ids, marker_tokens) for token_ids in tokenized["input_ids"]]
+        labels: list[list[int]] = []
+        for token_ids in tokenized["input_ids"]:
+            label_values, found_marker = _build_completion_labels(token_ids, marker_token_variants)
+            labels.append(label_values)
+            marker_miss_tracker["seen"] += 1
+            if not found_marker:
+                marker_miss_tracker["missing"] += 1
+        tokenized["labels"] = labels
         return tokenized
 
     tokenized_datasets = dataset.map(tokenize_function, batched=True, remove_columns=dataset["train"].column_names)
+    if marker_miss_tracker["missing"] > 0:
+        logger.info(
+            "Completion marker was not found in some tokenized samples; using full-sequence labels for those samples.",
+            marker=completion_marker,
+            missing_markers=marker_miss_tracker["missing"],
+            total_samples=marker_miss_tracker["seen"],
+        )
     train_sequence_lengths = [len(token_ids) for token_ids in tokenized_datasets["train"]["input_ids"]]
     if not train_sequence_lengths:
         raise ValueError("No training samples found after tokenization.")
@@ -687,87 +687,45 @@ def train_model(
         bnb_4bit_compute_dtype=_resolve_dtype(train_cfg["bnb_4bit_compute_dtype"])
     )
     
-    model_config_obj = _build_model_config_with_compat_fixes(
-        model_name=model_name,
-        logger=logger,
-        auto_config_cls=AutoConfig,
-    )
-
-    # Patch state dict and config to handle prefix mismatch and FP8 artifacts
-    import tempfile
-    from safetensors.torch import load_file, save_file
-    from huggingface_hub import snapshot_download
-
-    model_load_path = model_name
-    tmp_dir_obj = None
-
-    try:
-        snapshot_dir = snapshot_download(model_name)
-        weight_path = Path(snapshot_dir) / "model.safetensors"
-        
-        if weight_path.exists():
-            tmp_dir_obj = tempfile.TemporaryDirectory()
-            tmp_dir = Path(tmp_dir_obj.name)
-            
-            logger.info(f"Creating patched model directory at {tmp_dir}")
-            
-            # 1. Patch and save weights
-            raw_state_dict = load_file(str(weight_path))
-            patched_state_dict = {}
-            prefix = "language_model."
-            converted_count = 0
-            for k, v in raw_state_dict.items():
-                if k.endswith((".activation_scale", ".weight_scale_inv")):
-                    continue
-                
-                # Convert FP8 to BF16 to allow bitsandbytes 4-bit quantization
-                if "float8" in str(v.dtype):
-                    v = v.to(torch.bfloat16)
-                    converted_count += 1
-                
-                if k.startswith(prefix):
-                    patched_state_dict[k[len(prefix):]] = v
-                else:
-                    patched_state_dict[k] = v
-            
-            logger.info(f"Converted {converted_count} FP8 tensors to BF16.")
-            logger.info(f"Saving patched weights to {tmp_dir / 'model.safetensors'}...")
-            save_file(patched_state_dict, str(tmp_dir / "model.safetensors"))
-            logger.info("Weights saved successfully.")
-            del raw_state_dict
-            del patched_state_dict
-            
-            # 2. Save patched config
-            logger.info("Saving patched config...")
-            model_config_obj.save_pretrained(str(tmp_dir))
-            logger.info("Config saved successfully.")
-            
-            model_load_path = str(tmp_dir)
-        else:
-            logger.info("Local model.safetensors not found; falling back to default loading.")
-    except Exception as e:
-        logger.info(f"Model patching failed or skipped: {e}")
+    is_ministral3_model = "ministral-3" in model_name.lower()
+    model_config_obj = None
+    if is_ministral3_model:
+        model_config_obj = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+        model_config_obj = _strip_pretrained_quantization_config(model_config_obj, logger)
+        model_config_obj = _coerce_model_config_object(model_config_obj, logger)
+    else:
+        model_config_obj = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+        model_config_obj = _strip_pretrained_quantization_config(model_config_obj, logger)
+        model_config_obj = _coerce_model_config_object(model_config_obj, logger)
 
     model = None
+    device_map: dict[str, int] | str = "auto"
+    if torch.cuda.is_available() and torch.cuda.device_count() == 1:
+        device_map = {"": torch.cuda.current_device()}
+
     try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_load_path,
-            config=model_config_obj,
-            quantization_config=bnb_config,
-            device_map="auto",
-            trust_remote_code=True,
-            attn_implementation="eager"
-        )
+        if is_ministral3_model:
+            model = Mistral3ForConditionalGeneration.from_pretrained(
+                model_name,
+                config=model_config_obj,
+                quantization_config=bnb_config,
+                device_map=device_map,
+                trust_remote_code=True,
+                attn_implementation="eager",
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                config=model_config_obj,
+                quantization_config=bnb_config,
+                device_map=device_map,
+                trust_remote_code=True,
+                attn_implementation="eager",
+            )
         model.config.use_cache = False
         model = prepare_model_for_kbit_training(model)
     except Exception as exc:
         _raise_actionable_model_load_error(exc, model_name)
-    finally:
-        if tmp_dir_obj:
-            try:
-                tmp_dir_obj.cleanup()
-            except Exception:
-                pass
 
     if model is None:
         raise RuntimeError(f"Failed to load model {model_name}")
@@ -787,6 +745,11 @@ def train_model(
     save_steps = train_cfg.get("save_steps")
     if save_steps is None:
         save_steps = 100 # Safe default if strategy is steps
+    max_steps_cfg = int(train_cfg.get("max_steps", -1))
+    warmup_ratio = float(train_cfg.get("warmup_ratio", 0.03))
+    warmup_steps = 0
+    if max_steps_cfg > 0 and warmup_ratio > 0:
+        warmup_steps = max(1, int(max_steps_cfg * warmup_ratio))
     
     training_args = TrainingArguments(
         output_dir=str(output_dir),
@@ -808,7 +771,7 @@ def train_model(
         gradient_checkpointing=train_cfg["gradient_checkpointing"],
         gradient_checkpointing_kwargs={"use_reentrant": train_cfg["use_reentrant_gc"]},
         max_grad_norm=float(train_cfg.get("max_grad_norm", 0.3)),
-        warmup_ratio=float(train_cfg.get("warmup_ratio", 0.03)),
+        warmup_steps=warmup_steps,
         lr_scheduler_type=str(train_cfg.get("lr_scheduler_type", "cosine")),
         group_by_length=train_cfg["group_by_length"],
     )

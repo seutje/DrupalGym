@@ -7,10 +7,14 @@ from unittest import mock
 
 from pipeline.train import (
     _audit_dataset_artifacts,
-    _build_model_config_with_compat_fixes,
+    _build_completion_marker_variants,
     _build_completion_data_collator,
     _build_completion_labels,
     _completion_marker_for_prompt_template,
+    _ensure_native_ministral3_support,
+    _normalize_ministral3_config_for_causallm,
+    _coerce_model_config_object,
+    _strip_pretrained_quantization_config,
     _format_training_text,
     _load_tokenizer_for_model,
     _missing_quality_tools,
@@ -34,6 +38,15 @@ class _DummyTokenizer:
         self.pad_token = pad_token
         self.eos_token = eos_token
 
+    def __call__(self, text, add_special_tokens=False):
+        if text == "[/INST]":
+            return {"input_ids": [9]}
+        if text == " [/INST]":
+            return {"input_ids": [3, 9]}
+        if text == "\n[/INST]":
+            return {"input_ids": [4, 9]}
+        return {"input_ids": [1, 2]}
+
 
 class _CapturingLogger:
     def __init__(self):
@@ -50,9 +63,22 @@ class TrainHelpersTest(unittest.TestCase):
     def test_completion_labels_mask_prompt_tokens(self):
         marker_tokens = [30, 40]
         token_ids = [10, 20, 30, 40, 50, 60]
-        labels = _build_completion_labels(token_ids, marker_tokens)
+        labels, found = _build_completion_labels(token_ids, [marker_tokens])
+        self.assertTrue(found)
         self.assertEqual(labels[:4], [-100, -100, -100, -100])
         self.assertEqual(labels[4:], [50, 60])
+
+    def test_completion_labels_fallback_when_marker_missing(self):
+        token_ids = [10, 20, 30, 40]
+        labels, found = _build_completion_labels(token_ids, [[99]])
+        self.assertFalse(found)
+        self.assertEqual(labels, token_ids)
+
+    def test_completion_marker_variants_include_whitespace_forms(self):
+        variants = _build_completion_marker_variants(_DummyTokenizer(), "[/INST]")
+        self.assertIn([9], variants)
+        self.assertIn([3, 9], variants)
+        self.assertIn([4, 9], variants)
 
     def test_prompt_template_autodetects_ministral_3(self):
         model_cfg = {
@@ -319,90 +345,96 @@ class TrainHelpersTest(unittest.TestCase):
         self.assertIn("model_type `ministral3`", str(ctx.exception))
         self.assertIn("transformers", str(ctx.exception))
 
+    def test_raise_actionable_model_load_error_for_mistral3_message(self):
+        err = ValueError("Unrecognized configuration class Mistral3Config")
+        with self.assertRaises(RuntimeError) as ctx:
+            _raise_actionable_model_load_error(err, "mistralai/Ministral-3-3B-Instruct-2512")
+        self.assertIn("transformers>=5.0.0", str(ctx.exception))
+
     def test_raise_actionable_model_load_error_reraises_other_errors(self):
         original = RuntimeError("boom")
         with self.assertRaises(RuntimeError) as ctx:
             _raise_actionable_model_load_error(original, "any/model")
         self.assertIs(ctx.exception, original)
 
-    def test_build_model_config_with_compat_fixes_uses_regular_autoconfig(self):
-        sentinel = object()
+    def test_ensure_native_ministral3_support_non_ministral(self):
+        _ensure_native_ministral3_support("Qwen/Qwen2.5-Coder-3B")
 
-        class _AutoConfigOK:
-            @staticmethod
-            def from_pretrained(_model_name, trust_remote_code=True):
-                self.assertTrue(trust_remote_code)
-                return sentinel
+    def test_ensure_native_ministral3_support_rejects_old_transformers(self):
+        with mock.patch("transformers.__version__", "4.57.6"):
+            with self.assertRaises(RuntimeError) as ctx:
+                _ensure_native_ministral3_support("mistralai/Ministral-3-3B-Instruct-2512")
+        self.assertIn(">=5.0.0", str(ctx.exception))
 
-        cfg = _build_model_config_with_compat_fixes(
-            model_name="any/model",
-            logger=_DummyLogger(),
-            auto_config_cls=_AutoConfigOK,
-        )
-        self.assertIs(cfg, sentinel)
+    def test_ensure_native_ministral3_support_accepts_new_transformers(self):
+        with mock.patch("transformers.__version__", "5.1.0"):
+            _ensure_native_ministral3_support("mistralai/Ministral-3-3B-Instruct-2512")
 
-    def test_build_model_config_with_compat_fixes_patches_ministral3_text_config(self):
-        logger = _CapturingLogger()
+    def test_ensure_native_ministral3_support_rejects_transformers_v5(self):
+        with mock.patch("transformers.__version__", "4.99.0"):
+            with self.assertRaises(RuntimeError) as ctx:
+                _ensure_native_ministral3_support("mistralai/Ministral-3-3B-Instruct-2512")
+        self.assertIn(">=5.0.0", str(ctx.exception))
 
-        class _AutoConfigBroken:
-            @staticmethod
-            def from_pretrained(_model_name, trust_remote_code=True):
-                self.assertTrue(trust_remote_code)
-                raise KeyError("ministral3")
-
-            @staticmethod
-            def get_config_dict(_model_name, trust_remote_code=True):
-                self.assertTrue(trust_remote_code)
-                return (
-                    {
-                        "model_type": "mistral3",
-                        "text_config": {"model_type": "ministral3", "hidden_size": 128},
-                    },
-                    {},
-                )
-
+    def test_normalize_ministral3_config_for_causallm_converts_mistral3(self):
         class _Mistral3ConfigStub:
+            def to_dict(self):
+                return {"model_type": "mistral3", "hidden_size": 123}
+
+        _Mistral3ConfigStub.__name__ = "Mistral3Config"
+
+        class _Ministral3ConfigStub:
             @staticmethod
-            def from_dict(config_dict):
-                return config_dict
+            def from_dict(data):
+                return {"normalized": True, "data": data}
 
-        cfg = _build_model_config_with_compat_fixes(
-            model_name="mistralai/Ministral-3-3B-Instruct-2512",
-            logger=logger,
-            auto_config_cls=_AutoConfigBroken,
-            mistral3_config_cls=_Mistral3ConfigStub,
-        )
-        self.assertEqual(cfg["text_config"]["model_type"], "mistral")
-        self.assertTrue(any("compatibility patch" in event[1] for event in logger.events))
+        with mock.patch("transformers.Ministral3Config", _Ministral3ConfigStub):
+            out = _normalize_ministral3_config_for_causallm(
+                "mistralai/Ministral-3-3B-Instruct-2512",
+                _Mistral3ConfigStub(),
+                _DummyLogger(),
+            )
+        self.assertTrue(out["normalized"])
 
-    def test_build_model_config_with_compat_fixes_loader_fallback_without_get_config_dict(self):
-        logger = _CapturingLogger()
+    def test_strip_pretrained_quantization_config_rebuilds_config_without_key(self):
+        class _ConfigStub:
+            def __init__(self, payload):
+                self.payload = payload
 
-        class _AutoConfigNoGetter:
+            def to_dict(self):
+                return dict(self.payload)
+
+            @classmethod
+            def from_dict(cls, data):
+                obj = cls(data)
+                return obj
+
+        cfg = _ConfigStub({"model_type": "x", "quantization_config": {"quant_method": "fp8"}})
+        out = _strip_pretrained_quantization_config(cfg, _DummyLogger())
+        self.assertNotIn("quantization_config", out.to_dict())
+
+    def test_strip_pretrained_quantization_config_noop_without_key(self):
+        class _ConfigStub:
+            def to_dict(self):
+                return {"model_type": "x"}
+
+            @classmethod
+            def from_dict(cls, data):
+                return cls()
+
+        cfg = _ConfigStub()
+        out = _strip_pretrained_quantization_config(cfg, _DummyLogger())
+        self.assertIs(out, cfg)
+
+    def test_coerce_model_config_object_rebuilds_dict_ministral3(self):
+        class _Ministral3ConfigStub:
             @staticmethod
-            def from_pretrained(_model_name, trust_remote_code=True):
-                self.assertTrue(trust_remote_code)
-                raise KeyError("ministral3")
+            def from_dict(data):
+                return {"rebuilt": True, "model_type": data.get("model_type")}
 
-        class _Mistral3ConfigStub:
-            @staticmethod
-            def from_dict(config_dict):
-                return config_dict
-
-        def _loader(_model_name):
-            return {
-                "model_type": "mistral3",
-                "text_config": {"model_type": "ministral3", "hidden_size": 256},
-            }
-
-        cfg = _build_model_config_with_compat_fixes(
-            model_name="mistralai/Ministral-3-3B-Instruct-2512",
-            logger=logger,
-            auto_config_cls=_AutoConfigNoGetter,
-            mistral3_config_cls=_Mistral3ConfigStub,
-            config_dict_loader=_loader,
-        )
-        self.assertEqual(cfg["text_config"]["model_type"], "mistral")
+        with mock.patch("transformers.Ministral3Config", _Ministral3ConfigStub):
+            out = _coerce_model_config_object({"model_type": "ministral3"}, _DummyLogger())
+        self.assertTrue(out["rebuilt"])
 
 
 if __name__ == "__main__":

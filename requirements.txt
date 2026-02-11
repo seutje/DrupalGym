@@ -6,7 +6,7 @@ beautifulsoup4
 lxml
 markdownify
 torch
-transformers
+transformers>=5.0.0
 mistral-common
 peft
 accelerate
