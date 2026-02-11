@@ -374,19 +374,19 @@ dataset_refinement:
 
 training:
   test_run:
-    max_seq_len: 2048
+    max_seq_len: 1024
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
-    max_steps: 200
-    per_device_train_batch_size: 1
+    max_steps: 500
+    per_device_train_batch_size: 2
     per_device_eval_batch_size: 1
-    gradient_accumulation_steps: 16
+    gradient_accumulation_steps: 8
     learning_rate: 0.00005
     logging_steps: 5
-    eval_strategy: "no"
-    eval_steps: 25
+    eval_strategy: "steps"
+    eval_steps: 100
     save_strategy: "steps"
-    save_steps: 25
+    save_steps: 100
     warmup_ratio: 0.1
     fp16: false
     bf16: true
