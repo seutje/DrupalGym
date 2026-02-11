@@ -9,7 +9,12 @@ from pipeline.train import (
     _audit_dataset_artifacts,
     _build_completion_data_collator,
     _build_completion_labels,
+    _completion_marker_for_prompt_template,
+    _format_training_text,
     _missing_quality_tools,
+    _resolve_prompt_template,
+    PROMPT_TEMPLATE_MINISTRAL_INST,
+    PROMPT_TEMPLATE_PLAIN,
 )
 
 
@@ -28,6 +33,33 @@ class TrainHelpersTest(unittest.TestCase):
         labels = _build_completion_labels(token_ids, marker_tokens)
         self.assertEqual(labels[:4], [-100, -100, -100, -100])
         self.assertEqual(labels[4:], [50, 60])
+
+    def test_prompt_template_autodetects_ministral_3(self):
+        model_cfg = {
+            "name": "Ministral-3-3B-Test",
+            "base_model": "mistralai/Ministral-3-3B-Instruct-2512",
+        }
+        self.assertEqual(_resolve_prompt_template(model_cfg), PROMPT_TEMPLATE_MINISTRAL_INST)
+
+    def test_prompt_template_defaults_to_plain(self):
+        model_cfg = {
+            "name": "Qwen2.5-Coder-7B",
+            "base_model": "Qwen/Qwen2.5-Coder-7B",
+        }
+        self.assertEqual(_resolve_prompt_template(model_cfg), PROMPT_TEMPLATE_PLAIN)
+
+    def test_ministral_inst_format_and_marker(self):
+        text = _format_training_text(
+            "Do X",
+            "Given Y",
+            "Here is Z",
+            prompt_template=PROMPT_TEMPLATE_MINISTRAL_INST,
+        )
+        self.assertEqual(text, "<s>[INST] Do X\n\nGiven Y [/INST] Here is Z</s>")
+        self.assertEqual(
+            _completion_marker_for_prompt_template(PROMPT_TEMPLATE_MINISTRAL_INST),
+            "[/INST]",
+        )
 
     def test_dataset_artifact_audit_detects_numeric_artifact(self):
         with tempfile.TemporaryDirectory() as tmpdir:

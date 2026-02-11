@@ -66,6 +66,8 @@ MALFORMED_WRAPPER_RE = re.compile(
     r"(?im)(\[\s*/?inst\s*\]|^\s*###\s*(instruction|input|output|response)\s*:|<\|im_(start|end)\|>|<\|assistant\|>|<\|user\|>)"
 )
 OUTPUT_MARKER = "Output:"
+PROMPT_TEMPLATE_PLAIN = "instruction_input_output"
+PROMPT_TEMPLATE_MINISTRAL_INST = "ministral_inst"
 
 def _resolve_dtype(dtype_name: str):
     if dtype_name == "bfloat16":
@@ -94,6 +96,39 @@ def _build_completion_labels(token_ids: list[int], marker_tokens: list[int]) -> 
             labels[idx] = -100
         return labels
     return [-100] * len(labels)
+
+
+def _resolve_prompt_template(model_config: dict[str, Any]) -> str:
+    configured = str(model_config.get("prompt_template", "")).strip().lower()
+    if configured:
+        return configured
+
+    base_model = str(model_config.get("base_model", "")).lower()
+    model_name = str(model_config.get("name", "")).lower()
+    if "ministral-3" in base_model or "ministral-3" in model_name:
+        return PROMPT_TEMPLATE_MINISTRAL_INST
+    return PROMPT_TEMPLATE_PLAIN
+
+
+def _completion_marker_for_prompt_template(prompt_template: str) -> str:
+    if prompt_template == PROMPT_TEMPLATE_MINISTRAL_INST:
+        return "[/INST]"
+    return OUTPUT_MARKER
+
+
+def _format_training_text(
+    instruction: str,
+    input_text: str,
+    output_text: str,
+    *,
+    prompt_template: str,
+) -> str:
+    instruction = str(instruction or "")
+    input_text = str(input_text or "")
+    output_text = str(output_text or "")
+    if prompt_template == PROMPT_TEMPLATE_MINISTRAL_INST:
+        return f"<s>[INST] {instruction}\n\n{input_text} [/INST] {output_text}</s>"
+    return f"Instruction: {instruction}\nInput: {input_text}\nOutput: {output_text}"
 
 
 def _round_up_to_multiple(value: int, multiple: int) -> int:
@@ -404,11 +439,34 @@ def train_model(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    marker_tokens = tokenizer(OUTPUT_MARKER, add_special_tokens=False)["input_ids"]
+    supported_prompt_templates = {
+        PROMPT_TEMPLATE_PLAIN,
+        PROMPT_TEMPLATE_MINISTRAL_INST,
+    }
+    prompt_template = _resolve_prompt_template(model_config)
+    if prompt_template not in supported_prompt_templates:
+        logger.info(
+            "Unsupported prompt template configured; falling back to default template.",
+            configured_prompt_template=prompt_template,
+            fallback_prompt_template=PROMPT_TEMPLATE_PLAIN,
+        )
+        prompt_template = PROMPT_TEMPLATE_PLAIN
+
+    completion_marker = _completion_marker_for_prompt_template(prompt_template)
+    marker_tokens = tokenizer(completion_marker, add_special_tokens=False)["input_ids"]
+    if not marker_tokens:
+        raise ValueError(f"Unable to tokenize completion marker: {completion_marker!r}")
+    logger.info(
+        "Using training prompt template.",
+        prompt_template=prompt_template,
+        completion_marker=completion_marker,
+    )
 
     def tokenize_function(examples):
-        texts = [f"Instruction: {ins}\nInput: {inp}\nOutput: {out}" 
-                 for ins, inp, out in zip(examples["instruction"], examples["input"], examples["output"])]
+        texts = [
+            _format_training_text(ins, inp, out, prompt_template=prompt_template)
+            for ins, inp, out in zip(examples["instruction"], examples["input"], examples["output"])
+        ]
         tokenized = tokenizer(texts, truncation=True, max_length=train_cfg["max_seq_len"])
         tokenized["labels"] = [_build_completion_labels(token_ids, marker_tokens) for token_ids in tokenized["input_ids"]]
         return tokenized

@@ -396,12 +396,12 @@ training:
     lora_r: 16
     lora_alpha: 32
     lora_dropout: 0.05
-    lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+    lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
     bnb_4bit_compute_dtype: "float32"
     max_models: 1
     models:
-      - name: "Qwen2.5-Coder-3B-Test"
-        base_model: "Qwen/Qwen2.5-Coder-3B"
+      - name: "Ministral-3-3B-Test"
+        base_model: "mistralai/Ministral-3-3B-Instruct-2512"
         training_type: "QLoRA"
   full_scale:
     min_train_samples: 5000
