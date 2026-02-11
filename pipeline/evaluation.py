@@ -1873,8 +1873,11 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         artifact_guard=normalized_artifact_guard,
                     )
 
+                    generated_output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}__generated.txt"
                     raw_output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}__raw.txt"
                     normalized_output_path = model_dir / f"{variant}__{_sanitize_slug(prompt_id)}__normalized.txt"
+                    with open(generated_output_path, "w", encoding="utf-8") as handle:
+                        handle.write(generated_output)
                     with open(raw_output_path, "w", encoding="utf-8") as handle:
                         handle.write(raw_output)
                     with open(normalized_output_path, "w", encoding="utf-8") as handle:
@@ -1893,9 +1896,11 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         "instruction": instruction,
                         "input": input_text,
                         "output_file": raw_output_path.relative_to(root).as_posix(),
+                        "generated_output_file": generated_output_path.relative_to(root).as_posix(),
                         "raw_output_file": raw_output_path.relative_to(root).as_posix(),
                         "normalized_output_file": normalized_output_path.relative_to(root).as_posix(),
                         "postprocess_flags": postprocess_flags,
+                        "generated_output_length": len(generated_output),
                         "output_length": len(raw_output),
                         "normalized_output_length": len(normalized_output),
                         "checks": checks,
