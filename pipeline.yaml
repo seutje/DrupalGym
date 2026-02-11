@@ -374,21 +374,22 @@ dataset_refinement:
 
 training:
   test_run:
-    # L40S (48GB) test-run profile for quick convergence checks.
-    max_seq_len: 2048
+    # Stage 7 debug profile: force an overfit-style wiring check on a tiny subset.
+    max_seq_len: 1024
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
-    max_steps: 200
+    max_steps: 400
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
-    gradient_accumulation_steps: 16
-    learning_rate: 0.00002
+    gradient_accumulation_steps: 8
+    learning_rate: 0.00005
     logging_steps: 5
     eval_strategy: "steps"
-    eval_steps: 25
+    eval_steps: 20
     save_strategy: "steps"
-    save_steps: 25
-    warmup_ratio: 0.10
+    save_steps: 20
+    warmup_ratio: 0.0
+    lr_scheduler_type: "constant"
     fp16: false
     bf16: false
     gradient_checkpointing: true
@@ -402,6 +403,8 @@ training:
     max_grad_norm: 0.3
     optim: "paged_adamw_32bit"
     logging_nan_inf_filter: true
+    overfit_max_train_samples: 160
+    overfit_max_valid_samples: 40
     max_models: 1
     models:
       - name: "Ministral-3-3B-Test"
