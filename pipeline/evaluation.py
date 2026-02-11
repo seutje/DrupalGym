@@ -1607,32 +1607,66 @@ def _load_model_for_evaluation(
 
     requested_device = str(eval_cfg.get("device", "auto")).lower()
     cuda_available = torch_module.cuda.is_available()
+    use_4bit = bool(eval_cfg.get("load_in_4bit", True))
+    bnb_compute_dtype_name = str(eval_cfg.get("bnb_4bit_compute_dtype", "float16")).strip().lower()
+    bnb_compute_dtype = {
+        "float16": torch_module.float16,
+        "fp16": torch_module.float16,
+        "bfloat16": torch_module.bfloat16,
+        "bf16": torch_module.bfloat16,
+        "float32": torch_module.float32,
+        "fp32": torch_module.float32,
+    }.get(bnb_compute_dtype_name, torch_module.float16)
+    quantization_config = None
+    if use_4bit and cuda_available:
+        try:
+            from transformers import BitsAndBytesConfig
+
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=bnb_compute_dtype,
+            )
+            logger.info(
+                "Using 4-bit quantized base model load for evaluation.",
+                model=model_name,
+                bnb_4bit_compute_dtype=bnb_compute_dtype_name,
+            )
+        except Exception as exc:
+            logger.info(
+                "Unable to configure 4-bit eval load; falling back to non-quantized load.",
+                model=model_name,
+                error=str(exc),
+            )
     offload_dir = eval_dir / "offload" / _sanitize_slug(model_name)
     offload_dir.mkdir(parents=True, exist_ok=True)
 
     attempts: list[dict[str, Any]] = []
     if requested_device == "cpu":
-        attempts = [{"label": "cpu", "device_map": "cpu", "torch_dtype": torch_module.float32}]
+        attempts = [{"label": "cpu", "device_map": "cpu", "dtype": torch_module.float32}]
     elif requested_device == "cuda":
         if cuda_available:
-            attempts.append({"label": "cuda_auto", "device_map": "auto", "torch_dtype": torch_module.float16})
-        attempts.append({"label": "cpu_fallback", "device_map": "cpu", "torch_dtype": torch_module.float32})
+            attempts.append({"label": "cuda_auto", "device_map": "auto", "dtype": torch_module.float16})
+        attempts.append({"label": "cpu_fallback", "device_map": "cpu", "dtype": torch_module.float32})
     else:
         if cuda_available:
-            attempts.append({"label": "auto_cuda", "device_map": "auto", "torch_dtype": torch_module.float16})
+            attempts.append({"label": "auto_cuda", "device_map": "auto", "dtype": torch_module.float16})
         # On CPU-only hosts, loading directly on CPU is more reliable than device_map=auto.
         if cuda_available:
-            attempts.append({"label": "auto_cpu", "device_map": "auto", "torch_dtype": torch_module.float32})
-        attempts.append({"label": "cpu_fallback", "device_map": "cpu", "torch_dtype": torch_module.float32})
+            attempts.append({"label": "auto_cpu", "device_map": "auto", "dtype": torch_module.float32})
+        attempts.append({"label": "cpu_fallback", "device_map": "cpu", "dtype": torch_module.float32})
 
     last_error: Exception | None = None
     for attempt in attempts:
         load_kwargs = {
-            "torch_dtype": attempt["torch_dtype"],
+            "dtype": attempt["dtype"],
             "device_map": attempt["device_map"],
             "trust_remote_code": True,
             "low_cpu_mem_usage": True,
         }
+        if attempt["device_map"] != "cpu" and quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
         if attempt["device_map"] == "auto":
             load_kwargs["offload_folder"] = str(offload_dir)
             load_kwargs["offload_state_dict"] = True
@@ -1652,7 +1686,7 @@ def _load_model_for_evaluation(
                     **load_kwargs,
                 )
             else:
-                base_model = auto_model_cls.from_pretrained(base_model_id, **load_kwargs)
+                base_model = model_loader_cls.from_pretrained(base_model_id, **load_kwargs)
             model = peft_model_cls.from_pretrained(base_model, str(adapter_path))
             model.eval()
             return tokenizer, base_model, model
