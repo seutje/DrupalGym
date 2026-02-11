@@ -7,11 +7,14 @@ from unittest import mock
 
 from pipeline.train import (
     _audit_dataset_artifacts,
+    _build_model_config_with_compat_fixes,
     _build_completion_data_collator,
     _build_completion_labels,
     _completion_marker_for_prompt_template,
     _format_training_text,
+    _load_tokenizer_for_model,
     _missing_quality_tools,
+    _raise_actionable_model_load_error,
     _resolve_prompt_template,
     PROMPT_TEMPLATE_MINISTRAL_INST,
     PROMPT_TEMPLATE_PLAIN,
@@ -24,6 +27,23 @@ class _DummyLogger:
 
     def error(self, *_args, **_kwargs):
         return None
+
+
+class _DummyTokenizer:
+    def __init__(self, pad_token=None, eos_token="</s>"):
+        self.pad_token = pad_token
+        self.eos_token = eos_token
+
+
+class _CapturingLogger:
+    def __init__(self):
+        self.events = []
+
+    def info(self, message, **kwargs):
+        self.events.append(("INFO", message, kwargs))
+
+    def error(self, message, **kwargs):
+        self.events.append(("ERROR", message, kwargs))
 
 
 class TrainHelpersTest(unittest.TestCase):
@@ -241,6 +261,148 @@ class TrainHelpersTest(unittest.TestCase):
                     missing = _missing_quality_tools(config)
 
         self.assertEqual(missing, [])
+
+    def test_load_tokenizer_for_model_uses_auto_tokenizer(self):
+        class _AutoTokenizerOK:
+            @staticmethod
+            def from_pretrained(_model_name, trust_remote_code=True):
+                self.assertTrue(trust_remote_code)
+                return _DummyTokenizer(pad_token="<pad>")
+
+        tokenizer = _load_tokenizer_for_model(
+            model_name="mistralai/Ministral-3-3B-Instruct-2512",
+            logger=_DummyLogger(),
+            auto_tokenizer_cls=_AutoTokenizerOK,
+        )
+        self.assertEqual(tokenizer.pad_token, "<pad>")
+
+    def test_load_tokenizer_for_model_uses_mistral_fallback(self):
+        class _AutoTokenizerBroken:
+            @staticmethod
+            def from_pretrained(_model_name, trust_remote_code=True):
+                self.assertTrue(trust_remote_code)
+                raise ValueError(
+                    "Tokenizer class TokenizersBackend does not exist or is not currently imported."
+                )
+
+        class _MistralTokenizerOK:
+            @staticmethod
+            def from_pretrained(_model_name, trust_remote_code=True):
+                self.assertTrue(trust_remote_code)
+                return _DummyTokenizer(pad_token=None, eos_token="</s>")
+
+        tokenizer = _load_tokenizer_for_model(
+            model_name="mistralai/Ministral-3-3B-Instruct-2512",
+            logger=_DummyLogger(),
+            auto_tokenizer_cls=_AutoTokenizerBroken,
+            mistral_tokenizer_cls=_MistralTokenizerOK,
+        )
+        self.assertEqual(tokenizer.pad_token, "</s>")
+
+    def test_load_tokenizer_for_model_preserves_non_matching_error(self):
+        class _AutoTokenizerOtherError:
+            @staticmethod
+            def from_pretrained(_model_name, trust_remote_code=True):
+                self.assertTrue(trust_remote_code)
+                raise ValueError("Some other tokenizer error")
+
+        with self.assertRaises(ValueError):
+            _load_tokenizer_for_model(
+                model_name="any/model",
+                logger=_DummyLogger(),
+                auto_tokenizer_cls=_AutoTokenizerOtherError,
+            )
+
+    def test_raise_actionable_model_load_error_for_ministral3_keyerror(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            _raise_actionable_model_load_error(KeyError("ministral3"), "mistralai/Ministral-3-3B-Instruct-2512")
+        self.assertIn("model_type `ministral3`", str(ctx.exception))
+        self.assertIn("transformers", str(ctx.exception))
+
+    def test_raise_actionable_model_load_error_reraises_other_errors(self):
+        original = RuntimeError("boom")
+        with self.assertRaises(RuntimeError) as ctx:
+            _raise_actionable_model_load_error(original, "any/model")
+        self.assertIs(ctx.exception, original)
+
+    def test_build_model_config_with_compat_fixes_uses_regular_autoconfig(self):
+        sentinel = object()
+
+        class _AutoConfigOK:
+            @staticmethod
+            def from_pretrained(_model_name, trust_remote_code=True):
+                self.assertTrue(trust_remote_code)
+                return sentinel
+
+        cfg = _build_model_config_with_compat_fixes(
+            model_name="any/model",
+            logger=_DummyLogger(),
+            auto_config_cls=_AutoConfigOK,
+        )
+        self.assertIs(cfg, sentinel)
+
+    def test_build_model_config_with_compat_fixes_patches_ministral3_text_config(self):
+        logger = _CapturingLogger()
+
+        class _AutoConfigBroken:
+            @staticmethod
+            def from_pretrained(_model_name, trust_remote_code=True):
+                self.assertTrue(trust_remote_code)
+                raise KeyError("ministral3")
+
+            @staticmethod
+            def get_config_dict(_model_name, trust_remote_code=True):
+                self.assertTrue(trust_remote_code)
+                return (
+                    {
+                        "model_type": "mistral3",
+                        "text_config": {"model_type": "ministral3", "hidden_size": 128},
+                    },
+                    {},
+                )
+
+        class _Mistral3ConfigStub:
+            @staticmethod
+            def from_dict(config_dict):
+                return config_dict
+
+        cfg = _build_model_config_with_compat_fixes(
+            model_name="mistralai/Ministral-3-3B-Instruct-2512",
+            logger=logger,
+            auto_config_cls=_AutoConfigBroken,
+            mistral3_config_cls=_Mistral3ConfigStub,
+        )
+        self.assertEqual(cfg["text_config"]["model_type"], "mistral")
+        self.assertTrue(any("compatibility patch" in event[1] for event in logger.events))
+
+    def test_build_model_config_with_compat_fixes_loader_fallback_without_get_config_dict(self):
+        logger = _CapturingLogger()
+
+        class _AutoConfigNoGetter:
+            @staticmethod
+            def from_pretrained(_model_name, trust_remote_code=True):
+                self.assertTrue(trust_remote_code)
+                raise KeyError("ministral3")
+
+        class _Mistral3ConfigStub:
+            @staticmethod
+            def from_dict(config_dict):
+                return config_dict
+
+        def _loader(_model_name):
+            return {
+                "model_type": "mistral3",
+                "text_config": {"model_type": "ministral3", "hidden_size": 256},
+            }
+
+        cfg = _build_model_config_with_compat_fixes(
+            model_name="mistralai/Ministral-3-3B-Instruct-2512",
+            logger=logger,
+            auto_config_cls=_AutoConfigNoGetter,
+            mistral3_config_cls=_Mistral3ConfigStub,
+            config_dict_loader=_loader,
+        )
+        self.assertEqual(cfg["text_config"]["model_type"], "mistral")
 
 
 if __name__ == "__main__":

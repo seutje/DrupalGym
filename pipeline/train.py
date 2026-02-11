@@ -1,9 +1,11 @@
 import os
 import json
 import re
+import copy
 import shutil
 import subprocess
 import tempfile
+import traceback
 import torch
 from typing import Any
 
@@ -75,6 +77,178 @@ def _resolve_dtype(dtype_name: str):
     if dtype_name == "float32":
         return torch.float32
     return torch.float16
+
+
+def _dependency_versions() -> dict[str, str]:
+    versions: dict[str, str] = {}
+    modules = {
+        "torch": "torch",
+        "transformers": "transformers",
+        "peft": "peft",
+        "datasets": "datasets",
+        "accelerate": "accelerate",
+        "bitsandbytes": "bitsandbytes",
+        "mistral_common": "mistral_common",
+    }
+    for key, module_name in modules.items():
+        try:
+            module = __import__(module_name)
+            versions[key] = str(getattr(module, "__version__", "unknown"))
+        except Exception:
+            versions[key] = "unavailable"
+    return versions
+
+
+def _build_model_config_with_compat_fixes(
+    *,
+    model_name: str,
+    logger: PipelineLogger,
+    auto_config_cls,
+    mistral3_config_cls=None,
+    config_dict_loader=None,
+):
+    try:
+        return auto_config_cls.from_pretrained(model_name, trust_remote_code=True)
+    except (KeyError, RuntimeError, ValueError) as exc:
+        exc_str = str(exc).lower()
+        if "ministral3" not in exc_str and "mistral3" not in exc_str:
+            raise
+
+        if mistral3_config_cls is None:
+            try:
+                from transformers import MinistralConfig
+                mistral3_config_cls = MinistralConfig
+                target_type = "ministral"
+            except ImportError:
+                try:
+                    from transformers import MistralConfig
+                    mistral3_config_cls = MistralConfig
+                    target_type = "mistral"
+                except ImportError:
+                    try:
+                        from transformers.models.mistral3.configuration_mistral3 import Mistral3Config
+                        mistral3_config_cls = Mistral3Config
+                        target_type = "mistral"
+                    except Exception:
+                        raise
+
+        if config_dict_loader is not None:
+            config_data = config_dict_loader(model_name)
+        else:
+            # Safely try to get the config dict without relying on missing AutoConfig methods
+            try:
+                from huggingface_hub import hf_hub_download
+                config_path = hf_hub_download(repo_id=model_name, filename="config.json")
+                with open(config_path, "r", encoding="utf-8") as handle:
+                    config_data = json.load(handle)
+            except Exception as loader_exc:
+                # Fallback to internal transformers method if available
+                get_config_dict = getattr(auto_config_cls, "get_config_dict", None)
+                if callable(get_config_dict):
+                    config_data, _ = get_config_dict(model_name, trust_remote_code=True)
+                else:
+                    raise RuntimeError(
+                        f"Unable to load raw model config for Ministral compatibility patch: {loader_exc}"
+                    ) from loader_exc
+
+        patched = copy.deepcopy(config_data)
+        
+        # Remove pre-existing quantization_config to avoid conflicts with our BitsAndBytesConfig
+        if "quantization_config" in patched:
+            logger.info("Removing pre-existing quantization_config from model config to avoid conflicts.")
+            del patched["quantization_config"]
+
+        # Patch top-level model_type if it's mistral3/ministral3
+        if str(patched.get("model_type", "")).lower() in ("ministral3", "mistral3"):
+            patched["model_type"] = target_type
+
+        # Patch text_config if present (common in hierarchical configs)
+        text_cfg = patched.get("text_config")
+        if isinstance(text_cfg, dict):
+            if str(text_cfg.get("model_type", "")).lower() in ("ministral3", "mistral3"):
+                text_cfg["model_type"] = "mistral"
+            
+            # Promote key parameters to top-level for compatibility with CausalLM classes
+            for key in ["hidden_size", "num_attention_heads", "num_hidden_layers", 
+                        "num_key_value_heads", "head_dim", "rms_norm_eps", 
+                        "intermediate_size", "max_position_embeddings", "vocab_size"]:
+                if key in text_cfg and key not in patched:
+                    patched[key] = text_cfg[key]
+            
+            from transformers import MistralConfig
+            patched["text_config"] = MistralConfig.from_dict(text_cfg)
+
+        # Patch vision_config if present
+        vision_cfg = patched.get("vision_config")
+        if isinstance(vision_cfg, dict):
+            from transformers import PixtralVisionConfig
+            patched["vision_config"] = PixtralVisionConfig.from_dict(vision_cfg)
+
+        logger.info(
+            f"Applied compatibility patch for Ministral-3 using {mistral3_config_cls.__name__}.",
+            model=model_name,
+            target_type=target_type
+        )
+
+        return mistral3_config_cls.from_dict(patched)
+
+
+def _raise_actionable_model_load_error(exc: Exception, model_name: str):
+    if isinstance(exc, KeyError) and str(exc).strip("'\"") == "ministral3":
+        try:
+            import transformers
+
+            version = getattr(transformers, "__version__", "unknown")
+        except Exception:
+            version = "unknown"
+        raise RuntimeError(
+            "Model load failed because the installed `transformers` build does not recognize "
+            f"model_type `ministral3` for {model_name} (detected transformers={version}). "
+            "Upgrade `transformers` to a version that supports Ministral-3 and retry stage 7."
+        ) from exc
+    raise exc
+
+
+def _load_tokenizer_for_model(
+    *,
+    model_name: str,
+    logger: PipelineLogger,
+    auto_tokenizer_cls,
+    mistral_tokenizer_cls=None,
+):
+    try:
+        tokenizer = auto_tokenizer_cls.from_pretrained(model_name, trust_remote_code=True)
+    except ValueError as exc:
+        error_text = str(exc)
+        if "Tokenizer class TokenizersBackend does not exist or is not currently imported." not in error_text:
+            raise
+
+        if mistral_tokenizer_cls is None:
+            try:
+                from transformers import MistralCommonTokenizer
+
+                mistral_tokenizer_cls = MistralCommonTokenizer
+            except Exception as import_exc:
+                raise RuntimeError(
+                    "Failed to load tokenizer via AutoTokenizer due to a TokenizersBackend class mismatch. "
+                    "Install or upgrade `mistral-common` and `transformers`, then retry stage 7."
+                ) from import_exc
+
+        logger.info(
+            "AutoTokenizer failed with TokenizersBackend mismatch; using MistralCommonTokenizer fallback.",
+            model=model_name,
+        )
+        try:
+            tokenizer = mistral_tokenizer_cls.from_pretrained(model_name, trust_remote_code=True)
+        except Exception as fallback_exc:
+            raise RuntimeError(
+                "Tokenizer fallback with MistralCommonTokenizer failed. "
+                "Upgrade `mistral-common` and `transformers`, then retry stage 7."
+            ) from fallback_exc
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
 
 
 def _find_subsequence(tokens: list[int], pattern: list[int]) -> int:
@@ -416,6 +590,7 @@ def train_model(
 ):
     from datasets import load_dataset
     from transformers import (
+        AutoConfig,
         AutoModelForCausalLM,
         AutoTokenizer,
         BitsAndBytesConfig,
@@ -435,9 +610,11 @@ def train_model(
     dataset = load_dataset("json", data_files=data_files)
 
     # 2. Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = _load_tokenizer_for_model(
+        model_name=model_name,
+        logger=logger,
+        auto_tokenizer_cls=AutoTokenizer,
+    )
     
     supported_prompt_templates = {
         PROMPT_TEMPLATE_PLAIN,
@@ -509,17 +686,91 @@ def train_model(
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=_resolve_dtype(train_cfg["bnb_4bit_compute_dtype"])
     )
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto",
-        trust_remote_code=True,
-        attn_implementation="eager"
+    
+    model_config_obj = _build_model_config_with_compat_fixes(
+        model_name=model_name,
+        logger=logger,
+        auto_config_cls=AutoConfig,
     )
-    model.config.use_cache = False
 
-    model = prepare_model_for_kbit_training(model)
+    # Patch state dict and config to handle prefix mismatch and FP8 artifacts
+    import tempfile
+    from safetensors.torch import load_file, save_file
+    from huggingface_hub import snapshot_download
+
+    model_load_path = model_name
+    tmp_dir_obj = None
+
+    try:
+        snapshot_dir = snapshot_download(model_name)
+        weight_path = Path(snapshot_dir) / "model.safetensors"
+        
+        if weight_path.exists():
+            tmp_dir_obj = tempfile.TemporaryDirectory()
+            tmp_dir = Path(tmp_dir_obj.name)
+            
+            logger.info(f"Creating patched model directory at {tmp_dir}")
+            
+            # 1. Patch and save weights
+            raw_state_dict = load_file(str(weight_path))
+            patched_state_dict = {}
+            prefix = "language_model."
+            converted_count = 0
+            for k, v in raw_state_dict.items():
+                if k.endswith((".activation_scale", ".weight_scale_inv")):
+                    continue
+                
+                # Convert FP8 to BF16 to allow bitsandbytes 4-bit quantization
+                if "float8" in str(v.dtype):
+                    v = v.to(torch.bfloat16)
+                    converted_count += 1
+                
+                if k.startswith(prefix):
+                    patched_state_dict[k[len(prefix):]] = v
+                else:
+                    patched_state_dict[k] = v
+            
+            logger.info(f"Converted {converted_count} FP8 tensors to BF16.")
+            logger.info(f"Saving patched weights to {tmp_dir / 'model.safetensors'}...")
+            save_file(patched_state_dict, str(tmp_dir / "model.safetensors"))
+            logger.info("Weights saved successfully.")
+            del raw_state_dict
+            del patched_state_dict
+            
+            # 2. Save patched config
+            logger.info("Saving patched config...")
+            model_config_obj.save_pretrained(str(tmp_dir))
+            logger.info("Config saved successfully.")
+            
+            model_load_path = str(tmp_dir)
+        else:
+            logger.info("Local model.safetensors not found; falling back to default loading.")
+    except Exception as e:
+        logger.info(f"Model patching failed or skipped: {e}")
+
+    model = None
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_load_path,
+            config=model_config_obj,
+            quantization_config=bnb_config,
+            device_map="auto",
+            trust_remote_code=True,
+            attn_implementation="eager"
+        )
+        model.config.use_cache = False
+        model = prepare_model_for_kbit_training(model)
+    except Exception as exc:
+        _raise_actionable_model_load_error(exc, model_name)
+    finally:
+        if tmp_dir_obj:
+            try:
+                tmp_dir_obj.cleanup()
+            except Exception:
+                pass
+
+    if model is None:
+        raise RuntimeError(f"Failed to load model {model_name}")
 
     lora_config = LoraConfig(
         r=train_cfg["lora_r"],
@@ -533,6 +784,10 @@ def train_model(
     model = get_peft_model(model, lora_config)
 
     # 4. Training Arguments
+    save_steps = train_cfg.get("save_steps")
+    if save_steps is None:
+        save_steps = 100 # Safe default if strategy is steps
+    
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         per_device_train_batch_size=train_cfg["per_device_train_batch_size"],
@@ -545,7 +800,7 @@ def train_model(
         eval_strategy=train_cfg["eval_strategy"],
         eval_steps=train_cfg.get("eval_steps"),
         save_strategy=train_cfg["save_strategy"],
-        save_steps=train_cfg.get("save_steps"),
+        save_steps=save_steps,
         fp16=train_cfg["fp16"],
         bf16=train_cfg["bf16"],
         optim="paged_adamw_8bit",
@@ -583,6 +838,7 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
     gpu_name = torch.cuda.get_device_name(0)
     gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
     logger.info(f"Detected GPU: {gpu_name} ({gpu_mem_gb:.1f} GB VRAM)")
+    logger.info("Training dependency versions.", versions=_dependency_versions())
 
     dataset_version = config.get("dataset", {}).get("training_version", "v1")
     dataset_dir = root / "dataset" / dataset_version
@@ -680,7 +936,12 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
         try:
             train_model(model_cfg, dataset_dir, output_dir, logger, train_cfg)
         except Exception as e:
-            logger.error(f"Training failed for {model_name}: {str(e)}")
+            logger.error(
+                f"Training failed for {model_name}: {str(e)}",
+                exception_type=type(e).__name__,
+                exception_repr=repr(e),
+                traceback=traceback.format_exc(),
+            )
             return 1
         
     return 0
