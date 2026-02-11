@@ -38,6 +38,8 @@ class SftGenerationHelpersTest(unittest.TestCase):
         self.assertIn("<source_file>", sample["instruction"])
         self.assertIn("Source file: <source_file>", sample["input"])
         self.assertIn("Namespace:", sample["input"])
+        self.assertIn("Source snippet:", sample["input"])
+        self.assertIn("```php", sample["input"])
 
     def test_multiple_declarations_use_path_fallback(self):
         content = (
@@ -66,6 +68,8 @@ class SftGenerationHelpersTest(unittest.TestCase):
         self.assertNotIn("explain what it defines", sample["instruction"].lower())
         self.assertIn("Source file: <source_file>", sample["input"])
         self.assertIn("Configuration topic:", sample["input"])
+        self.assertIn("Source snippet:", sample["input"])
+        self.assertIn("```yaml", sample["input"])
         self.assertEqual(sample["metadata"]["sample_type"], "retrieval")
 
     def test_doc_generation_honors_allowlist_and_denylist(self):
@@ -75,6 +79,8 @@ class SftGenerationHelpersTest(unittest.TestCase):
         sample = self.generator.samples[0]
         self.assertIn("Explain the following topic", sample["instruction"])
         self.assertIn("Source file: <source_file>", sample["input"])
+        self.assertIn("Source snippet:", sample["input"])
+        self.assertIn("```text", sample["input"])
         self.assertIn("Topic: State API", sample["output"])
         self.assertEqual(sample["metadata"]["sample_type"], "retrieval")
 
@@ -97,6 +103,7 @@ class SftGenerationHelpersTest(unittest.TestCase):
         self.assertIn("component.yml", sample["output"])
         self.assertIn("card.twig", sample["output"])
         self.assertIn("Component name: card", sample["input"])
+        self.assertIn("Source snippets:", sample["input"])
         usage_variant = self.generator.samples[2]
         self.assertIn("Example usage", usage_variant["output"])
         contract_variant = self.generator.samples[3]

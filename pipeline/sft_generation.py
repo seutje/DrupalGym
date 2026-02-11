@@ -24,6 +24,7 @@ CHANGE_RECORD_PAIR_RE = re.compile(
 )
 CHANGE_RECORD_METADATA_RE = re.compile(r"(?mi)^-\s*([A-Za-z ]+):\s*(.+)$")
 CHANGE_RECORD_RATIONALE_RE = re.compile(r"(?is)##\s*Rationale\s*(.*?)(?:\n##\s*Before|\Z)")
+OUTER_FENCE_RE = re.compile(r"^\s*```[A-Za-z0-9_+-]*\n(.*)\n```\s*$", re.DOTALL)
 
 
 def _read_clean_file(clean_path: Path, clean_dir: Path) -> dict:
@@ -117,6 +118,18 @@ class InstructionGenerator:
         if namespace_match:
             return namespace_match.group(1).strip()
         return "Drupal\\Custom"
+
+    @staticmethod
+    def _source_snippet(content: str, max_chars: int = 1200) -> str:
+        snippet = str(content).strip()
+        match = OUTER_FENCE_RE.match(snippet)
+        if match:
+            snippet = match.group(1).strip()
+        if not snippet:
+            return ""
+        if len(snippet) > max_chars:
+            snippet = snippet[:max_chars].rstrip() + "\n..."
+        return snippet
 
     @staticmethod
     def _strip_doc_noise(content: str) -> str:
@@ -337,6 +350,10 @@ class InstructionGenerator:
                 f"Module hint: {module_hint}",
                 f"Target symbol: {symbol_kind} {symbol_name}",
                 f"Namespace: {namespace_value}",
+                "Source snippet:",
+                "```php",
+                self._source_snippet(content),
+                "```",
             ]
         )
         self._append(
@@ -370,6 +387,10 @@ class InstructionGenerator:
                 f"Module hint: {module_hint}",
                 f"Configuration topic: {stem}",
                 "Task: Return the complete Drupal 11 YAML configuration in one fenced yaml block.",
+                "Source snippet:",
+                "```yaml",
+                self._source_snippet(content),
+                "```",
             ]
         )
         self._append(
@@ -396,6 +417,10 @@ class InstructionGenerator:
                 f"File name hint: {source_file}",
                 f"Module hint: {module_hint}",
                 "Task: Return the complete Drupal 11 Twig template implementation.",
+                "Source snippet:",
+                "```twig",
+                self._source_snippet(content),
+                "```",
             ]
         )
         self._append(
@@ -434,6 +459,9 @@ class InstructionGenerator:
                 "Requirements:",
                 "- Include both component.yml and Twig template content.",
                 "- Keep the output aligned with Drupal 11 Single Directory Component conventions.",
+                "Source snippets:",
+                f"```yaml\n{self._source_snippet(yaml_content, max_chars=800)}\n```",
+                f"```twig\n{self._source_snippet(twig_content, max_chars=800)}\n```",
             ]
         )
         output_bundle = "\n".join(
@@ -598,6 +626,10 @@ class InstructionGenerator:
                 f"File name hint: {source_file}",
                 f"Domain hint: {module_hint}",
                 "Task: Explain this Drupal 11 topic clearly and concisely.",
+                "Source snippet:",
+                "```text",
+                self._source_snippet(content),
+                "```",
             ]
         )
         self._append(

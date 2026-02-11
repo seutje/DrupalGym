@@ -67,6 +67,19 @@ DEFAULT_MODERN_DRUPAL_INSTRUCTION_TERMS = (
 )
 SOURCE_FILE_PLACEHOLDER = "<source_file>"
 WHITESPACE_RE = re.compile(r"\s+")
+OUTER_FENCE_RE = re.compile(r"^\s*```[A-Za-z0-9_+-]*\n(.*)\n```\s*$", re.DOTALL)
+
+
+def _source_snippet(text: str, max_chars: int = 1200) -> str:
+    snippet = str(text).strip()
+    match = OUTER_FENCE_RE.match(snippet)
+    if match:
+        snippet = match.group(1).strip()
+    if not snippet:
+        return ""
+    if len(snippet) > max_chars:
+        snippet = snippet[:max_chars].rstrip() + "\n..."
+    return snippet
 
 
 def _has_predominantly_numeric_fenced_block(output: str) -> bool:
@@ -274,10 +287,19 @@ def _build_contract_instruction_sample(
 
     base_input = str(record.get("input", "")).strip()
     source_hint = f"Source file: {SOURCE_FILE_PLACEHOLDER}\nFile name hint: {source_file}"
+    source_snippet = _source_snippet(output)
+    snippet_block = ""
+    if source_snippet:
+        snippet_block = f"Source snippet:\n```{language}\n{source_snippet}\n```"
     if SOURCE_FILE_PLACEHOLDER not in base_input:
-        record["input"] = f"{source_hint}\n{base_input}".strip() if base_input else source_hint
+        merged = "\n".join(part for part in [source_hint, snippet_block, base_input] if part).strip()
+        record["input"] = merged
     else:
-        record["input"] = base_input
+        if "Source snippet:" in base_input:
+            record["input"] = base_input
+        else:
+            merged = "\n".join(part for part in [base_input, snippet_block] if part).strip()
+            record["input"] = merged
 
     should_fence = language in fence_required_languages or language == "text"
     if should_fence and not _has_any_fenced_block(output):
@@ -902,6 +924,16 @@ def _build_spec(sample: dict[str, Any], symbol_kind: str, symbol_name: str) -> s
         "- Use Drupal 11 and PHP 8.3 compatible patterns.",
         f"- Provide a complete {symbol_kind} implementation for {symbol_name}.",
     ]
+    snippet = _source_snippet(output, max_chars=1000)
+    if snippet:
+        lines.extend(
+            [
+                "Source snippet:",
+                "```php",
+                snippet,
+                "```",
+            ]
+        )
     if uses:
         lines.append("- Include required imports:")
         for statement in uses:
