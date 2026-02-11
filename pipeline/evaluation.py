@@ -423,7 +423,21 @@ def _generate_response(
     prompt_template: str = PROMPT_TEMPLATE_PLAIN,
 ) -> str:
     prompt = _build_prompt(instruction, input_text, prompt_template=prompt_template)
-    inputs = tokenizer(prompt, return_tensors="pt")
+    inputs = None
+    if prompt_template == PROMPT_TEMPLATE_MINISTRAL_INST and hasattr(tokenizer, "apply_chat_template"):
+        user_content = instruction if not input_text else f"{instruction}\n\n{input_text}"
+        messages = [{"role": "user", "content": user_content}]
+        try:
+            templated = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            inputs = tokenizer(templated, return_tensors="pt")
+        except Exception:
+            inputs = None
+    if inputs is None:
+        inputs = tokenizer(prompt, return_tensors="pt")
     input_device = _model_input_device(model)
     inputs = {key: value.to(input_device) for key, value in inputs.items()}
 
@@ -439,7 +453,14 @@ def _generate_response(
         # Seq2seq-style generation can return only generated tokens.
         response_tokens = output_tokens
     response = tokenizer.decode(response_tokens, skip_special_tokens=True)
-    return response.strip()
+    stripped = response.strip()
+    if stripped:
+        return stripped
+
+    # Keep a debuggable payload when the model only emits special tokens/whitespace.
+    if response_tokens:
+        return tokenizer.decode(response_tokens, skip_special_tokens=False).strip()
+    return ""
 
 
 def _extract_code_blocks(output: str) -> list[str]:
