@@ -377,17 +377,17 @@ training:
     max_seq_len: 1024
     padding_strategy: "dynamic"
     pad_to_multiple_of: 8
-    max_steps: 500
-    per_device_train_batch_size: 2
+    max_steps: 300
+    per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
-    gradient_accumulation_steps: 8
-    learning_rate: 0.00005
+    gradient_accumulation_steps: 16
+    learning_rate: 0.00001
     logging_steps: 5
     eval_strategy: "steps"
     eval_steps: 100
     save_strategy: "steps"
     save_steps: 100
-    warmup_ratio: 0.1
+    warmup_ratio: 0.03
     fp16: false
     bf16: true
     gradient_checkpointing: true
@@ -397,7 +397,8 @@ training:
     lora_alpha: 32
     lora_dropout: 0.05
     lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-    bnb_4bit_compute_dtype: "bfloat16"
+    bnb_4bit_compute_dtype: "float32"
+    max_grad_norm: 0.0
     max_models: 1
     models:
       - name: "Ministral-3-3B-Test"
