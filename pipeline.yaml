@@ -490,7 +490,7 @@ evaluation:
   seed: 42
   mode: "test_run"
   max_new_tokens: 512
-  min_new_tokens: 8
+  min_new_tokens: 0
   device: "cuda"
   max_models: 1
   run_php_lint: true
@@ -501,7 +501,7 @@ evaluation:
   php_snippet_policy: "php_only" # "php_only" (default) or "all_fences" for legacy behavior
   repetition_penalty: 1.1
   no_repeat_ngram_size: 4
-  apply_generation_stop_truncation: true
+  apply_generation_stop_truncation: false
   strict_contract_mode: true
   enforce_no_outside_prose_for_php_required: true
   interim_autofencing:
@@ -512,22 +512,7 @@ evaluation:
     enabled: true
     step_interval: 25
     include_adapter: true
-  generation_blocklist_strings:
-    - "<|fim_prefix|>"
-    - "<|fim_middle|>"
-    - "<|fim_suffix|>"
-    - "<|fim_pad|>"
-    - "<fim_prefix>"
-    - "<fim_middle>"
-    - "<fim_suffix>"
-    - "<fim_pad>"
-    - "<|file_sep|>"
-    - "<|im_start|>"
-    - "<|im_end|>"
-    - "<|assistant|>"
-    - "<|user|>"
-    - "### Instruction:"
-    - "### Response:"
+  generation_blocklist_strings: []
   generation_stop_regex:
     - "<\\|fim_(prefix|middle|suffix|pad)\\|>"
     - "<fim_(prefix|middle|suffix|pad)>"
