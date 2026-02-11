@@ -381,7 +381,7 @@ training:
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
     gradient_accumulation_steps: 16
-    learning_rate: 0.00001
+    learning_rate: 0.000005
     logging_steps: 5
     eval_strategy: "steps"
     eval_steps: 100
@@ -389,7 +389,7 @@ training:
     save_steps: 100
     warmup_ratio: 0.03
     fp16: false
-    bf16: true
+    bf16: false
     gradient_checkpointing: true
     use_reentrant_gc: false
     group_by_length: false
@@ -398,7 +398,9 @@ training:
     lora_dropout: 0.05
     lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
     bnb_4bit_compute_dtype: "float32"
-    max_grad_norm: 0.0
+    max_grad_norm: 0.3
+    optim: "adamw_torch"
+    logging_nan_inf_filter: false
     max_models: 1
     models:
       - name: "Ministral-3-3B-Test"
