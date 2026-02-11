@@ -1397,6 +1397,80 @@ def _adapter_subdir_for_mode(mode: str) -> str:
     return "final" if mode in {"full_scale", "final"} else "test_run"
 
 
+def _strip_pretrained_quantization_config(config_obj, logger: PipelineLogger):
+    config_dict_getter = getattr(config_obj, "to_dict", None)
+    if not callable(config_dict_getter):
+        return config_obj
+    config_data = config_dict_getter()
+    if not isinstance(config_data, dict) or "quantization_config" not in config_data:
+        return config_obj
+
+    logger.info("Removing pre-existing quantization_config from model config to avoid conflicts.")
+    config_data = dict(config_data)
+    config_data.pop("quantization_config", None)
+    config_cls = type(config_obj)
+    from_dict = getattr(config_cls, "from_dict", None)
+    if callable(from_dict):
+        try:
+            return from_dict(config_data)
+        except Exception:
+            return config_obj
+    return config_obj
+
+
+def _coerce_model_config_object(config_obj, logger: PipelineLogger):
+    if not isinstance(config_obj, dict):
+        return config_obj
+    model_type = str(config_obj.get("model_type", "")).strip().lower()
+    try:
+        if model_type == "ministral3":
+            from transformers import Ministral3Config
+
+            rebuilt = Ministral3Config.from_dict(config_obj)
+        else:
+            from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+
+            config_cls = CONFIG_MAPPING[model_type]
+            rebuilt = config_cls.from_dict(config_obj)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Model config unexpectedly became a dict for model_type={model_type or 'unknown'} "
+            "and could not be rebuilt into a config object."
+        ) from exc
+
+    logger.info(
+        "Rebuilt dict model config into config object.",
+        model_type=model_type or "unknown",
+        rebuilt_type=type(rebuilt).__name__,
+    )
+    return rebuilt
+
+
+def _load_tokenizer_for_evaluation(*, model_id: str, logger: PipelineLogger, auto_tokenizer_cls):
+    try:
+        tokenizer = auto_tokenizer_cls.from_pretrained(model_id, trust_remote_code=True)
+    except ValueError as exc:
+        error_text = str(exc)
+        if "Tokenizer class TokenizersBackend does not exist or is not currently imported." not in error_text:
+            raise
+        try:
+            from transformers import MistralCommonTokenizer
+        except Exception as import_exc:
+            raise RuntimeError(
+                "Failed to load tokenizer via AutoTokenizer due to a TokenizersBackend class mismatch. "
+                "Install or upgrade `mistral-common` and `transformers`, then retry stage 8."
+            ) from import_exc
+        logger.info(
+            "AutoTokenizer failed with TokenizersBackend mismatch; using MistralCommonTokenizer fallback.",
+            model=model_id,
+        )
+        tokenizer = MistralCommonTokenizer.from_pretrained(model_id, trust_remote_code=True)
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
+
+
 def _checkpoint_step(path: Path) -> int:
     try:
         return int(path.name.split("-", 1)[1])
@@ -1458,9 +1532,21 @@ def _load_model_for_evaluation(
     auto_model_cls,
     peft_model_cls,
 ):
-    tokenizer = auto_tokenizer_cls.from_pretrained(base_model_id, trust_remote_code=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = _load_tokenizer_for_evaluation(
+        model_id=base_model_id,
+        logger=logger,
+        auto_tokenizer_cls=auto_tokenizer_cls,
+    )
+    is_ministral3_model = "ministral-3" in base_model_id.lower() or "ministral-3" in model_name.lower()
+    model_loader_cls = auto_model_cls
+    model_config_obj = None
+    if is_ministral3_model:
+        from transformers import AutoConfig, Mistral3ForConditionalGeneration
+
+        model_loader_cls = Mistral3ForConditionalGeneration
+        model_config_obj = AutoConfig.from_pretrained(base_model_id, trust_remote_code=True)
+        model_config_obj = _strip_pretrained_quantization_config(model_config_obj, logger)
+        model_config_obj = _coerce_model_config_object(model_config_obj, logger)
 
     requested_device = str(eval_cfg.get("device", "auto")).lower()
     cuda_available = torch_module.cuda.is_available()
@@ -1501,7 +1587,15 @@ def _load_model_for_evaluation(
                 attempt=attempt["label"],
                 device_map=attempt["device_map"],
             )
-            base_model = auto_model_cls.from_pretrained(base_model_id, **load_kwargs)
+            if is_ministral3_model:
+                base_model = model_loader_cls.from_pretrained(
+                    base_model_id,
+                    config=model_config_obj,
+                    attn_implementation="eager",
+                    **load_kwargs,
+                )
+            else:
+                base_model = auto_model_cls.from_pretrained(base_model_id, **load_kwargs)
             model = peft_model_cls.from_pretrained(base_model, str(adapter_path))
             model.eval()
             return tokenizer, base_model, model
