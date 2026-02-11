@@ -35,8 +35,16 @@ def run_stage(stage_name: str, config: dict):
         return run_dataset_refinement_stage(config, logger, root)
     elif stage_name in {"7", "phase7", "train"}:
         return run_training_stage(config, logger, root, mode="test_run")
+    elif stage_name in {"7o", "phase7o", "overfit", "overfit_probe"}:
+        return run_training_stage(config, logger, root, mode="overfit_probe")
     elif stage_name in {"8", "phase8", "eval"}:
         return run_evaluation_stage(config, logger, root)
+    elif stage_name in {"8f", "phase8f", "eval_full"}:
+        eval_cfg = dict(config.get("evaluation", {}))
+        eval_cfg["mode"] = "full_scale"
+        full_eval_config = dict(config)
+        full_eval_config["evaluation"] = eval_cfg
+        return run_evaluation_stage(full_eval_config, logger, root)
     elif stage_name in {"9", "phase9", "full_train"}:
         return run_training_stage(config, logger, root, mode="full_scale")
     elif stage_name in {"10", "phase10", "export"}:

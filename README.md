@@ -232,14 +232,22 @@ Command:
 ```bash
 python3 -m pipeline run 7
 ```
+Overfit sanity check command:
+```bash
+python3 -m pipeline run 7o
+```
 Prereqs: CUDA-capable GPU, dataset configured by `dataset.training_version` (default `dataset/v2/`).
-What it does: runs a QLoRA test from `training.test_run` in `pipeline.yaml` (defaults: `Qwen2.5-Coder-3B`, `max_seq_len=2048`, `max_steps=100`, ~10GB VRAM).
+What it does: runs a QLoRA test from `training.test_run` in `pipeline.yaml` (defaults: `Ministral-3-3B-Test`, `max_seq_len=2048`, `max_steps=200`, tuned for L40S/RunPod).
 Outputs: adapters under `models/<model>/test_run/adapter/` and logs in `manifests/`.
 
 **Stage 8: Evaluation**
 Command:
 ```bash
 python3 -m pipeline run 8
+```
+Full-scale adapter evaluation command:
+```bash
+python3 -m pipeline run 8f
 ```
 Prereqs: trained adapter at `models/<model>/{test_run|final}/adapter/` for the configured evaluation mode.
 What it does: runs a configurable Drupal 11 prompt suite (default config now uses 40 prompts across attributes/DI/routing/SDC/twig with balanced PHP-required vs non-PHP-required tasks), generates fine-tuned and baseline outputs, enforces prompt contracts (including strict fenced-block count/order and outside-prose checks for PHP-required prompts when `evaluation.strict_contract_mode` is enabled), runs automated checks, and writes comparison metrics. Scoring is split into semantic and style channels: semantic pass/fail uses required checks + PHP lint/PHPStan + artifact guardrails; style uses PHPCS separately so style failures do not mask functional gains. Stage 8 now supports generation suppression controls via `evaluation.generation_blocklist_strings`, `evaluation.generation_stop_regex`, and `evaluation.apply_generation_stop_truncation` to reduce FIM/wrapper leakage propagation while still hard-failing artifact-hit outputs. Metrics and manifests include evaluator and generation profile hashes (`generation_profile_sha256`, prompt-suite hash, evaluator logic hash) for run comparability, and `eval/sample_outputs/` is recreated on each run so `eval/sample_outputs/index.json` only indexes current-run outputs.
@@ -251,7 +259,7 @@ Command:
 python3 -m pipeline run 9
 ```
 Prereqs: CUDA-capable GPU, dataset configured by `dataset.training_version` (default `dataset/v2/`).
-What it does: runs a full-scale QLoRA training pass using `training.full_scale` settings in `pipeline.yaml` (default target: `Qwen2.5-Coder-7B`, tuned for a single L40S RunPod instance).
+What it does: runs a full-scale QLoRA training pass using `training.full_scale` settings in `pipeline.yaml` (default target: `Ministral-3-8B`, tuned for a single L40S RunPod instance).
 Outputs: adapters under `models/<model>/final/adapter/` and logs in `manifests/`.
 
 **Stage 10: Export and Quantization**
@@ -314,14 +322,14 @@ source venv/bin/activate
 `scripts/runpod_setup.sh` now also installs `php`, `phpcs`, `phpstan`, and configures PHPCS with the Drupal coding standard.
 
 ### 3. Running Full-Scale Training on L40S
-The `pipeline.yaml` is configured with L40S-friendly `full_scale` settings for `Qwen2.5-Coder-7B`:
+The `pipeline.yaml` is configured with L40S-friendly `full_scale` settings for `Ministral-3-8B`:
 
 ```bash
 python3 -m pipeline run 9
 ```
 
 **Current full_scale profile (single L40S):**
-- **Context Length:** `max_seq_len: 3072`
+- **Context Length:** `max_seq_len: 2048`
 - **Batching:** `per_device_train_batch_size: 1`, `gradient_accumulation_steps: 32` (effective batch size 32)
 - **Precision:** `bf16: true`, 4-bit base model with `bnb_4bit_compute_dtype: bfloat16`
 - **Epochs:** `num_train_epochs: 3`

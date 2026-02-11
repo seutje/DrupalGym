@@ -32,6 +32,7 @@ sft/
 quality/
 models/
 sources/
+exports/
 !sources/
 !sources/manifest.json
 eval/

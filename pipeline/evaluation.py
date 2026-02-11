@@ -12,8 +12,10 @@ from typing import Any
 from .logger import PipelineLogger
 from .manifest import Manifest, calculate_hash
 
-EVALUATOR_LOGIC_VERSION = "2026-02-10.1"
+EVALUATOR_LOGIC_VERSION = "2026-02-11.1"
 ARTIFACT_BLOCKLIST_VERSION = "2026-02-10.1"
+PROMPT_TEMPLATE_PLAIN = "plain"
+PROMPT_TEMPLATE_MINISTRAL_INST = "ministral_inst"
 DEFAULT_PROMPT_SUITE = [
     {
         "id": "block_attribute",
@@ -134,6 +136,7 @@ def _build_generation_profile(eval_cfg: dict[str, Any]) -> dict[str, Any]:
     profile = {
         "do_sample": False,
         "max_new_tokens": int(eval_cfg.get("max_new_tokens", 512)),
+        "min_new_tokens": int(eval_cfg.get("min_new_tokens", 0)),
         "repetition_penalty": float(eval_cfg.get("repetition_penalty", 1.0)),
         "no_repeat_ngram_size": int(eval_cfg.get("no_repeat_ngram_size", 0)),
         "generation_blocklist_strings": _string_list(
@@ -253,6 +256,7 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
         "seed": int(config.get("seed", 42)),
         "mode": "test_run",
         "max_new_tokens": 512,
+        "min_new_tokens": 0,
         "device": "auto",
         "max_models": 1,
         "run_php_lint": True,
@@ -315,6 +319,7 @@ def _read_eval_config(config: dict[str, Any]) -> dict[str, Any]:
     merged["prompt_suite"] = normalized_prompts or DEFAULT_PROMPT_SUITE
     merged["seed"] = int(merged.get("seed", defaults["seed"]))
     merged["max_new_tokens"] = int(merged.get("max_new_tokens", defaults["max_new_tokens"]))
+    merged["min_new_tokens"] = int(merged.get("min_new_tokens", defaults["min_new_tokens"]))
     merged["max_models"] = int(merged.get("max_models", defaults["max_models"]))
     merged["max_code_checks_per_response"] = int(
         merged.get("max_code_checks_per_response", defaults["max_code_checks_per_response"])
@@ -355,7 +360,21 @@ def _resolve_models_for_eval(config: dict[str, Any], eval_cfg: dict[str, Any]) -
     return [model for model in fallback if isinstance(model, dict)]
 
 
-def _build_prompt(instruction: str, input_text: str = "") -> str:
+def _resolve_prompt_template(model_config: dict[str, Any]) -> str:
+    configured = str(model_config.get("prompt_template", "")).strip().lower()
+    if configured:
+        return configured
+
+    base_model = str(model_config.get("base_model", "")).lower()
+    model_name = str(model_config.get("name", "")).lower()
+    if "ministral-3" in base_model or "ministral-3" in model_name:
+        return PROMPT_TEMPLATE_MINISTRAL_INST
+    return PROMPT_TEMPLATE_PLAIN
+
+
+def _build_prompt(instruction: str, input_text: str = "", *, prompt_template: str = PROMPT_TEMPLATE_PLAIN) -> str:
+    if prompt_template == PROMPT_TEMPLATE_MINISTRAL_INST:
+        return f"<s>[INST] {instruction}\n\n{input_text} [/INST]"
     return f"Instruction: {instruction}\nInput: {input_text}\nOutput: "
 
 
@@ -380,6 +399,9 @@ def _build_generation_kwargs(tokenizer, max_new_tokens: int, eval_cfg: dict[str,
     no_repeat_ngram_size = int(eval_cfg.get("no_repeat_ngram_size", 0))
     if no_repeat_ngram_size > 0:
         kwargs["no_repeat_ngram_size"] = no_repeat_ngram_size
+    min_new_tokens = int(eval_cfg.get("min_new_tokens", 0))
+    if min_new_tokens > 0:
+        kwargs["min_new_tokens"] = min_new_tokens
     bad_words_ids = eval_cfg.get("_bad_words_ids")
     if not isinstance(bad_words_ids, list):
         bad_words_ids = _build_bad_words_ids(
@@ -390,8 +412,17 @@ def _build_generation_kwargs(tokenizer, max_new_tokens: int, eval_cfg: dict[str,
     return kwargs
 
 
-def _generate_response(model, tokenizer, instruction: str, input_text: str, max_new_tokens: int, eval_cfg: dict[str, Any]) -> str:
-    prompt = _build_prompt(instruction, input_text)
+def _generate_response(
+    model,
+    tokenizer,
+    instruction: str,
+    input_text: str,
+    max_new_tokens: int,
+    eval_cfg: dict[str, Any],
+    *,
+    prompt_template: str = PROMPT_TEMPLATE_PLAIN,
+) -> str:
+    prompt = _build_prompt(instruction, input_text, prompt_template=prompt_template)
     inputs = tokenizer(prompt, return_tensors="pt")
     input_device = _model_input_device(model)
     inputs = {key: value.to(input_device) for key, value in inputs.items()}
@@ -400,8 +431,13 @@ def _generate_response(model, tokenizer, instruction: str, input_text: str, max_
         generation_kwargs = _build_generation_kwargs(tokenizer, max_new_tokens=max_new_tokens, eval_cfg=eval_cfg)
         outputs = model.generate(**inputs, **generation_kwargs)
 
-    prompt_tokens = inputs["input_ids"].shape[1]
-    response_tokens = outputs[0][prompt_tokens:]
+    prompt_tokens = inputs["input_ids"][0].tolist()
+    output_tokens = outputs[0].tolist()
+    if len(output_tokens) >= len(prompt_tokens) and output_tokens[: len(prompt_tokens)] == prompt_tokens:
+        response_tokens = output_tokens[len(prompt_tokens) :]
+    else:
+        # Seq2seq-style generation can return only generated tokens.
+        response_tokens = output_tokens
     response = tokenizer.decode(response_tokens, skip_special_tokens=True)
     return response.strip()
 
@@ -1699,6 +1735,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                     "base_model": base_model,
                     "adapter_path": target_path,
                     "target_name": target_name,
+                    "prompt_template": _resolve_prompt_template(model_cfg),
                 }
             )
 
@@ -1726,6 +1763,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
         model_name = model_cfg["name"]
         base_model_id = model_cfg["base_model"]
         adapter_path = model_cfg["adapter_path"]
+        prompt_template = str(model_cfg.get("prompt_template", PROMPT_TEMPLATE_PLAIN))
         logger.info(f"Evaluating model {model_name} with adapter {adapter_path}")
 
         try:
@@ -1773,6 +1811,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         input_text=input_text,
                         max_new_tokens=int(runtime_eval_cfg["max_new_tokens"]),
                         eval_cfg=runtime_eval_cfg,
+                        prompt_template=prompt_template,
                     )
                     raw_output, generation_guardrails = _truncate_on_generation_markers(
                         generated_output,
@@ -1847,6 +1886,7 @@ def run_evaluation_stage(config: dict, logger: PipelineLogger, root: Path) -> in
                         "source_model_name": model_cfg.get("source_model_name", model_name),
                         "eval_target": model_cfg.get("target_name", "adapter"),
                         "base_model": base_model_id,
+                        "prompt_template": prompt_template,
                         "variant": variant,
                         "prompt_id": prompt_id,
                         "category": category,

@@ -592,6 +592,22 @@ def train_model(
         "validation": str(dataset_dir / "valid.jsonl")
     }
     dataset = load_dataset("json", data_files=data_files)
+    overfit_max_train_samples = int(train_cfg.get("overfit_max_train_samples", 0))
+    overfit_max_valid_samples = int(train_cfg.get("overfit_max_valid_samples", 0))
+    if overfit_max_train_samples > 0:
+        train_count = min(overfit_max_train_samples, len(dataset["train"]))
+        dataset["train"] = dataset["train"].select(range(train_count))
+        logger.info(
+            "Applying overfit probe train subset.",
+            selected_train_samples=train_count,
+        )
+    if overfit_max_valid_samples > 0:
+        valid_count = min(overfit_max_valid_samples, len(dataset["validation"]))
+        dataset["validation"] = dataset["validation"].select(range(valid_count))
+        logger.info(
+            "Applying overfit probe validation subset.",
+            selected_valid_samples=valid_count,
+        )
 
     # 2. Tokenizer
     tokenizer = _load_tokenizer_for_model(
@@ -868,6 +884,8 @@ def run_training_stage(config: dict, logger: PipelineLogger, root: Path, mode: s
         "max_models": 1,
         "padding_strategy": "dynamic",
         "pad_to_multiple_of": 8,
+        "overfit_max_train_samples": 0,
+        "overfit_max_valid_samples": 0,
     }
     train_cfg = default_cfg | config.get("training", {}).get(mode, {})
     quality_cfg = config.get("quality", {})
