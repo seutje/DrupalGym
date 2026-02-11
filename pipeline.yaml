@@ -382,7 +382,7 @@ training:
     per_device_train_batch_size: 1
     per_device_eval_batch_size: 1
     gradient_accumulation_steps: 16
-    learning_rate: 0.00005
+    learning_rate: 0.00002
     logging_steps: 5
     eval_strategy: "steps"
     eval_steps: 25
@@ -390,7 +390,7 @@ training:
     save_steps: 25
     warmup_ratio: 0.10
     fp16: false
-    bf16: true
+    bf16: false
     gradient_checkpointing: true
     use_reentrant_gc: false
     group_by_length: true
@@ -398,10 +398,10 @@ training:
     lora_alpha: 64
     lora_dropout: 0.05
     lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-    bnb_4bit_compute_dtype: "bfloat16"
+    bnb_4bit_compute_dtype: "float32"
     max_grad_norm: 0.3
-    optim: "paged_adamw_8bit"
-    logging_nan_inf_filter: false
+    optim: "paged_adamw_32bit"
+    logging_nan_inf_filter: true
     max_models: 1
     models:
       - name: "Ministral-3-3B-Test"
@@ -425,7 +425,7 @@ training:
     save_steps: 20
     warmup_ratio: 0.03
     fp16: false
-    bf16: true
+    bf16: false
     gradient_checkpointing: true
     use_reentrant_gc: false
     group_by_length: true
@@ -433,9 +433,10 @@ training:
     lora_alpha: 64
     lora_dropout: 0.05
     lora_target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-    bnb_4bit_compute_dtype: "bfloat16"
+    bnb_4bit_compute_dtype: "float32"
     max_grad_norm: 0.3
-    optim: "paged_adamw_8bit"
+    optim: "paged_adamw_32bit"
+    logging_nan_inf_filter: true
     overfit_max_train_samples: 128
     overfit_max_valid_samples: 32
     max_models: 1
@@ -473,6 +474,8 @@ training:
     lora_dropout: 0.05
     lora_target_modules: ["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
     bnb_4bit_compute_dtype: "bfloat16"
+    optim: "paged_adamw_32bit"
+    logging_nan_inf_filter: true
     max_models: 1 # Focus on one model for the L40S full_scale session
     models:
       - name: "Ministral-3-8B"

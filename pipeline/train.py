@@ -756,6 +756,18 @@ def train_model(
     )
 
     model = get_peft_model(model, lora_config)
+    total_params = sum(param.numel() for param in model.parameters())
+    trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
+    if trainable_params <= 0:
+        raise RuntimeError(
+            "LoRA produced zero trainable parameters. Check `lora_target_modules` for this model architecture."
+        )
+    logger.info(
+        "LoRA trainable parameter summary.",
+        trainable_params=trainable_params,
+        total_params=total_params,
+        trainable_ratio=round(trainable_params / max(total_params, 1), 8),
+    )
 
     # 4. Training Arguments
     save_steps = train_cfg.get("save_steps")
